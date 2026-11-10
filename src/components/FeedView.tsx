@@ -8,9 +8,10 @@ import { formatShort } from "@/lib/dates";
 import PostArt from "./PostArt";
 import { initialsOf } from "./ClientForm";
 
-/** Hue da imagem que aparece no feed: capa (Reels), 1ª imagem (Carrossel) ou a foto. */
-function feedHue(b: Block) {
-  return b.format === "reels" ? (b.hue + 40) % 360 : b.hue;
+/** Imagem que aparece no feed: capa (Reels), 1ª imagem (Carrossel) ou a foto. */
+function feedImage(b: Block) {
+  if (b.format === "reels") return b.media.find((m) => m.kind === "cover")?.url;
+  return b.media.find((m) => m.kind === "image")?.url;
 }
 
 /**
@@ -65,7 +66,7 @@ export default function FeedView({ client, blocks, onClose, onOpen, paused }: {
           {/* Perfil */}
           <div className="flex items-center gap-4 px-5 pb-4 pt-5">
             <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full font-display text-xl font-semibold text-paper ring-2 ring-paper outline outline-2 outline-sand" style={{ background: client.color }}>
-              {client.avatar ? <img src={client.avatar} alt={client.name} className="h-full w-full object-cover" /> : initials}
+              {client.avatarUrl ? <img src={client.avatarUrl} alt={client.name} className="h-full w-full object-cover" /> : initials}
             </span>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{client.name}</p>
@@ -96,7 +97,11 @@ export default function FeedView({ client, blocks, onClose, onOpen, paused }: {
                   className="group relative block aspect-[3/4] overflow-hidden"
                   title={`${b.title} · ${formatShort(b.date)} · ${statusLabel(b.status, b.format)}`}
                 >
-                  <PostArt hue={feedHue(b)} title={b.title} compact className="h-full w-full transition group-hover:scale-[1.03]" />
+                  {feedImage(b) ? (
+                    <img src={feedImage(b)} alt={b.title} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+                  ) : (
+                    <PostArt hue={b.hue} title={b.title} compact className="h-full w-full transition group-hover:scale-[1.03]" />
+                  )}
                   {Icon && (
                     <span className="absolute right-1.5 top-1.5 rounded-full bg-paper/85 p-1 text-ink backdrop-blur">
                       <Icon size={12} />

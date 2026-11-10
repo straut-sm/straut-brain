@@ -1,197 +1,157 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { SEED_BLOCKS, SEED_CLIENTS } from "./seed";
-import type { Author, Block, Client, ClientFile, Format, Snapshot, Status } from "./types";
-import { FORMATS } from "./meta";
+import { useRouter } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition } from "react";
+import * as A from "@/app/actions";
+import type { Result } from "@/app/actions";
+import { browserClient } from "./supabase/browser";
+import type { Block, Client, ClientInput, FileKind, Format, MediaKind, Role, Status } from "./types";
 
-const STORAGE_KEY = "straut-brain-prototipo-v2";
-
-export type ClientInput = Omit<Client, "id" | "slug" | "files">;
-
-export function slugify(name: string) {
-  return name
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "cliente";
-}
-
-interface State {
+interface Data {
   clients: Client[];
   blocks: Block[];
 }
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function snap(b: Block): Snapshot {
-  return { format: b.format, title: b.title, caption: b.caption, script: b.script, date: b.date };
-}
-
-function now() {
-  return new Date().toISOString();
-}
-
-interface Store extends State {
-  ready: boolean;
+interface Store extends Data {
+  role: Role;
+  /** Há uma ação em andamento (salvando / atualizando). */
+  busy: boolean;
   getClient: (slug: string) => Client | undefined;
   clientById: (id: string) => Client | undefined;
-  createBlock: (clientId: string, date: string) => string;
-  updateBlock: (id: string, by: Author, patch: Partial<Pick<Block, "title" | "caption" | "script" | "date">>) => void;
-  changeFormat: (id: string, format: Format) => void;
-  setStatus: (id: string, status: Status, by: Author, action: string) => void;
-  approve: (id: string) => void;
-  suggest: (id: string, field: "caption" | "script", proposed: string) => void;
-  resolveSuggestion: (id: string, accept: boolean) => void;
-  addComment: (id: string, by: Author, text: string) => void;
-  markCommentsSeen: (id: string) => void;
-  deleteBlock: (id: string) => void;
-  addClient: (input: ClientInput) => Client;
-  updateClient: (id: string, input: Partial<ClientInput>) => void;
-  addFile: (clientId: string, file: Omit<ClientFile, "id" | "at">) => void;
-  removeFile: (clientId: string, fileId: string) => void;
-  reset: () => void;
+  createBlock: (clientId: string, date: string) => Promise<string | null>;
+  updateBlock: (id: string, patch: Partial<Pick<Block, "title" | "caption" | "script" | "date">>) => Promise<void>;
+  changeFormat: (id: string, format: Format) => Promise<void>;
+  setStatus: (id: string, status: Status) => Promise<void>;
+  approve: (id: string) => Promise<void>;
+  suggest: (id: string, field: "caption" | "script", proposed: string) => Promise<void>;
+  resolveSuggestion: (id: string, accept: boolean) => Promise<void>;
+  addComment: (id: string, text: string) => Promise<void>;
+  markCommentsSeen: (id: string) => Promise<void>;
+  deleteBlock: (id: string) => Promise<void>;
+  saveClient: (id: string | null, input: ClientInput) => Promise<{ id: string; slug: string } | null>;
+  setActive: (id: string, active: boolean) => Promise<void>;
+  setAvatar: (clientId: string, image: Blob | null) => Promise<void>;
+  uploadMedia: (blockId: string, kind: MediaKind, files: File[]) => Promise<void>;
+  removeMedia: (mediaId: string) => Promise<void>;
+  addFiles: (clientId: string, files: File[], kind: (f: File) => FileKind) => Promise<void>;
+  removeFile: (fileId: string) => Promise<void>;
+  downloadFile: (fileId: string) => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
 
-export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<State>({ clients: SEED_CLIENTS, blocks: SEED_BLOCKS });
-  const [ready, setReady] = useState(false);
+export function StoreProvider({ initial, role, children }: { initial: Data; role: Role; children: React.ReactNode }) {
+  const router = useRouter();
+  const [data, setData] = useState<Data>(initial);
+  const [pending, setPending] = useState(0);
+  const [refreshing, startTransition] = useTransition();
 
-  useEffect(() => {
+  // Dados novos do servidor (após router.refresh)
+  useEffect(() => setData(initial), [initial]);
+
+  const call = useCallback(async <T,>(fn: () => Promise<Result<T>>, refresh = true): Promise<T | null> => {
+    setPending((n) => n + 1);
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setState(JSON.parse(raw));
+      const res = await fn();
+      if (!res.ok) {
+        alert(res.error);
+        return null;
+      }
+      if (refresh) startTransition(() => router.refresh());
+      return res.data;
     } catch {
-      /* armazenamento indisponível: segue com os dados de exemplo */
+      alert("Sem conexão com o servidor. Verifique sua internet e tente novamente.");
+      return null;
+    } finally {
+      setPending((n) => n - 1);
     }
-    setReady(true);
+  }, [router]);
+
+  /** Envia um arquivo direto ao Supabase com link assinado pelo servidor. */
+  const upload = useCallback(async (target: Parameters<typeof A.createUploadUrl>[0], body: Blob, contentType?: string) => {
+    const signed = await A.createUploadUrl(target);
+    if (!signed.ok) throw new Error(signed.error);
+    const { bucket, path, token } = signed.data;
+    const { error } = await browserClient().storage.from(bucket).uploadToSignedUrl(path, token, body, {
+      contentType: contentType || (body as File).type || "application/octet-stream",
+    });
+    if (error) {
+      const tooBig = /size|exceeded|too large/i.test(error.message);
+      throw new Error(tooBig ? "Arquivo maior que o limite do plano atual do Supabase." : "Falha ao enviar o arquivo.");
+    }
+    return path;
   }, []);
 
-  useEffect(() => {
-    if (!ready) return;
+  const uploading = useCallback(async (fn: () => Promise<void>) => {
+    setPending((n) => n + 1);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      /* ignora */
+      await fn();
+      startTransition(() => router.refresh());
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Falha ao enviar o arquivo.");
+    } finally {
+      setPending((n) => n - 1);
     }
-  }, [state, ready]);
-
-  const mutate = useCallback((id: string, fn: (b: Block) => Block) => {
-    setState((s) => ({ ...s, blocks: s.blocks.map((b) => (b.id === id ? fn(b) : b)) }));
-  }, []);
+  }, [router]);
 
   const store = useMemo<Store>(() => ({
-    ...state,
-    ready,
-    getClient: (slug) => state.clients.find((c) => c.slug === slug),
-    clientById: (id) => state.clients.find((c) => c.id === id),
+    ...data,
+    role,
+    busy: pending > 0 || refreshing,
+    getClient: (slug) => data.clients.find((c) => c.slug === slug),
+    clientById: (id) => data.clients.find((c) => c.id === id),
 
-    createBlock: (clientId, date) => {
-      const id = `n-${uid()}`;
-      const block: Block = {
-        id, clientId, date, title: "Novo conteúdo", format: "roteiro", status: "em_producao",
-        caption: "", script: "", slides: 5, hue: Math.floor(Math.random() * 360),
-        history: [{ id: uid(), at: now(), by: "Straut", action: "Bloco criado como Roteiro" }],
-        comments: [],
-      };
-      setState((s) => ({ ...s, blocks: [...s.blocks, block] }));
-      return id;
+    createBlock: (clientId, date) => call(() => A.createBlock(clientId, date)),
+    updateBlock: async (id, patch) => { await call(() => A.updateBlock(id, patch)); },
+    changeFormat: async (id, format) => { await call(() => A.changeFormat(id, format)); },
+    setStatus: async (id, status) => { await call(() => A.setStatus(id, status)); },
+    approve: async (id) => { await call(() => A.approve(id)); },
+    suggest: async (id, field, proposed) => { await call(() => A.suggest(id, field, proposed)); },
+    resolveSuggestion: async (id, accept) => { await call(() => A.resolveSuggestion(id, accept)); },
+    addComment: async (id, text) => { await call(() => A.addComment(id, text)); },
+    markCommentsSeen: async (id) => { await call(() => A.markCommentsSeen(id)); },
+    deleteBlock: async (id) => { await call(() => A.deleteBlock(id)); },
+    saveClient: (id, input) => call(() => A.saveClient(id, input)),
+    setActive: async (id, active) => { await call(() => A.setActive(id, active)); },
+
+    setAvatar: (clientId, image) => uploading(async () => {
+      if (!image) {
+        const r = await A.setAvatar(clientId, null);
+        if (!r.ok) throw new Error(r.error);
+        return;
+      }
+      const path = await upload({ type: "avatar", clientId }, image, "image/jpeg");
+      const r = await A.setAvatar(clientId, path);
+      if (!r.ok) throw new Error(r.error);
+    }),
+
+    uploadMedia: (blockId, kind, files) => uploading(async () => {
+      const paths: string[] = [];
+      for (const f of files) {
+        const ext = f.name.includes(".") ? f.name.split(".").pop()! : "bin";
+        paths.push(await upload({ type: "media", blockId, ext }, f));
+      }
+      const r = await A.attachMedia(blockId, kind, paths);
+      if (!r.ok) throw new Error(r.error);
+    }),
+
+    removeMedia: async (mediaId) => { await call(() => A.removeMedia(mediaId)); },
+
+    addFiles: (clientId, files, kind) => uploading(async () => {
+      for (const f of files) {
+        const path = await upload({ type: "file", clientId, name: f.name }, f);
+        const r = await A.registerFile(clientId, { name: f.name, kind: kind(f), size: f.size, path });
+        if (!r.ok) throw new Error(r.error);
+      }
+    }),
+
+    removeFile: async (fileId) => { await call(() => A.removeFile(fileId)); },
+
+    downloadFile: async (fileId) => {
+      const url = await call(() => A.fileDownloadUrl(fileId), false);
+      if (url) window.location.href = url;
     },
-
-    updateBlock: (id, by, patch) =>
-      mutate(id, (b) => {
-        const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== b[k]);
-        if (!changed.length) return b;
-        const names: Record<string, string> = { title: "título", caption: "legenda", script: "roteiro", date: "data de postagem" };
-        return {
-          ...b, ...patch,
-          history: [...b.history, { id: uid(), at: now(), by, action: `Editou ${changed.map((k) => names[k]).join(", ")}`, before: snap(b) }],
-        };
-      }),
-
-    changeFormat: (id, format) =>
-      mutate(id, (b) => b.format === format ? b : ({
-        ...b, format,
-        history: [...b.history, { id: uid(), at: now(), by: "Straut", action: `Formato alterado de ${FORMATS[b.format].label} para ${FORMATS[format].label}`, before: snap(b) }],
-      })),
-
-    setStatus: (id, status, by, action) =>
-      mutate(id, (b) => ({ ...b, status, history: [...b.history, { id: uid(), at: now(), by, action }] })),
-
-    approve: (id) =>
-      mutate(id, (b) => ({
-        ...b, status: "aprovado",
-        history: [...b.history, { id: uid(), at: now(), by: "Cliente", action: b.format === "roteiro" ? "Roteiro aprovado" : "Post aprovado" }],
-      })),
-
-    suggest: (id, field, proposed) =>
-      mutate(id, (b) => {
-        const original = b[field];
-        if (proposed.trim() === original.trim()) return b;
-        return {
-          ...b, status: "ajuste_sugerido",
-          suggestion: { field, original, proposed, at: now() },
-          history: [...b.history, { id: uid(), at: now(), by: "Cliente", action: `Sugeriu alteração ${field === "caption" ? "na legenda" : "no roteiro"}` }],
-        };
-      }),
-
-    resolveSuggestion: (id, accept) =>
-      mutate(id, (b) => {
-        if (!b.suggestion) return b;
-        const { field, proposed } = b.suggestion;
-        if (accept) {
-          return {
-            ...b, [field]: proposed, suggestion: undefined, status: "aprovado",
-            history: [...b.history, { id: uid(), at: now(), by: "Straut", action: "Aceitou a sugestão da cliente", before: snap(b) }],
-          };
-        }
-        return {
-          ...b, suggestion: undefined, status: "aguardando_aprovacao",
-          history: [...b.history, { id: uid(), at: now(), by: "Straut", action: "Recusou a sugestão da cliente" }],
-        };
-      }),
-
-    addComment: (id, by, text) =>
-      mutate(id, (b) => ({ ...b, comments: [...b.comments, { id: uid(), at: now(), by, text, seen: by === "Straut" }] })),
-
-    markCommentsSeen: (id) =>
-      mutate(id, (b) => b.comments.some((c) => !c.seen) ? { ...b, comments: b.comments.map((c) => ({ ...c, seen: true })) } : b),
-
-    deleteBlock: (id) => setState((s) => ({ ...s, blocks: s.blocks.filter((b) => b.id !== id) })),
-
-    addClient: (input) => {
-      const base = slugify(input.name);
-      let slug = base;
-      let n = 2;
-      while (state.clients.some((c) => c.slug === slug)) slug = `${base}-${n++}`;
-      const client: Client = { ...input, id: `cl-${uid()}`, slug, files: [] };
-      setState((s) => ({ ...s, clients: [...s.clients, client] }));
-      return client;
-    },
-
-    updateClient: (id, input) =>
-      setState((s) => ({ ...s, clients: s.clients.map((c) => (c.id === id ? { ...c, ...input } : c)) })),
-
-    addFile: (clientId, file) =>
-      setState((s) => ({
-        ...s,
-        clients: s.clients.map((c) =>
-          c.id === clientId ? { ...c, files: [{ ...file, id: `f-${uid()}`, at: now() }, ...c.files] } : c),
-      })),
-
-    removeFile: (clientId, fileId) =>
-      setState((s) => ({
-        ...s,
-        clients: s.clients.map((c) => (c.id === clientId ? { ...c, files: c.files.filter((f) => f.id !== fileId) } : c)),
-      })),
-
-    reset: () => {
-      try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignora */ }
-      setState({ clients: SEED_CLIENTS, blocks: SEED_BLOCKS });
-    },
-  }), [state, ready, mutate]);
+  }), [data, role, pending, refreshing, call, upload, uploading]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

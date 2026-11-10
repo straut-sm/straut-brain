@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Eye, EyeOff, Power, Upload, X } from "lucide-react";
+import { Check, Eye, EyeOff, Loader2, Power, Upload, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type ClientInput, useStore } from "@/lib/store";
-import type { Client } from "@/lib/types";
+import { useStore } from "@/lib/store";
+import type { Client, ClientInput } from "@/lib/types";
 import { Button } from "./ui";
 
 export const CLIENT_COLORS = [
@@ -17,10 +17,9 @@ const EMPTY: ClientInput = {
 };
 
 /** Formulário de nova cliente (client = undefined) ou de gestão de uma cliente existente. */
-export default function ClientForm({ client, onClose, onCreated }: {
+export default function ClientForm({ client, onClose }: {
   client?: Client;
   onClose: () => void;
-  onCreated?: (c: Client) => void;
 }) {
   const store = useStore();
   const isNew = !client;
@@ -32,12 +31,16 @@ export default function ClientForm({ client, onClose, onCreated }: {
     return {
       name: client.name, specialty: client.specialty, contractPosts: client.contractPosts,
       paymentDay: client.paymentDay, color: client.color, driveUrl: client.driveUrl,
-      password: client.password, active: client.active, notes: client.notes, avatar: client.avatar,
+      password: "", active: client.active, notes: client.notes,
     };
   });
+  // Foto: undefined = sem mudança · null = remover · Blob = nova foto
+  const [avatarPreview, setAvatarPreview] = useState<string | undefined>(client?.avatarUrl);
+  const [avatarBlob, setAvatarBlob] = useState<Blob | null | undefined>(undefined);
   const [showPw, setShowPw] = useState(false);
   const [tried, setTried] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -54,27 +57,28 @@ export default function ClientForm({ client, onClose, onCreated }: {
     specialty: !v.specialty.trim() ? "Informe o nicho." : "",
     contractPosts: !(v.contractPosts >= 1 && v.contractPosts <= 99) ? "Entre 1 e 99." : "",
     paymentDay: !(v.paymentDay >= 1 && v.paymentDay <= 31) ? "Dia entre 1 e 31." : "",
-    password: v.password.trim().length < 4 ? "Mínimo de 4 caracteres." : "",
+    password:
+      isNew && v.password.trim().length < 4 ? "Mínimo de 4 caracteres."
+      : !isNew && v.password.trim() && v.password.trim().length < 4 ? "Mínimo de 4 caracteres."
+      : "",
   };
   const valid = Object.values(errors).every((e) => !e);
 
-  const save = (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setTried(true);
-    if (!valid) return;
+    if (!valid || saving) return;
+    setSaving(true);
     const clean = { ...v, name: v.name.trim(), specialty: v.specialty.trim(), password: v.password.trim() };
-    if (isNew) {
-      const c = store.addClient(clean);
-      onCreated?.(c);
-    } else {
-      store.updateClient(client.id, clean);
-    }
-    onClose();
+    const saved = await store.saveClient(client?.id ?? null, clean);
+    if (saved && avatarBlob !== undefined) await store.setAvatar(saved.id, avatarBlob);
+    setSaving(false);
+    if (saved) onClose();
   };
 
-  const toggleActive = () => {
+  const toggleActive = async () => {
     if (!client) return;
-    store.updateClient(client.id, { active: !client.active });
+    await store.setActive(client.id, !client.active);
     setV((s) => ({ ...s, active: !client.active }));
     setConfirmOff(false);
   };
@@ -118,8 +122,8 @@ export default function ClientForm({ client, onClose, onCreated }: {
             <AvatarField
               name={v.name}
               color={v.color}
-              value={v.avatar}
-              onChange={(a) => set("avatar", a)}
+              value={avatarPreview}
+              onChange={(preview, blob) => { setAvatarPreview(preview); setAvatarBlob(blob); }}
             />
             <Field label="Nome da cliente" className="sm:col-span-2">
               <input className={input} value={v.name} onChange={(e) => set("name", e.target.value)} placeholder="Ex.: Dra. Ana Souza" autoFocus={isNew} />
@@ -139,14 +143,21 @@ export default function ClientForm({ client, onClose, onCreated }: {
                 {err("paymentDay")}
               </Field>
             </div>
-            <Field label="Senha da página da cliente">
+            <Field label={isNew ? "Senha da página da cliente" : "Nova senha da página (opcional)"}>
               <div className="relative">
-                <input type={showPw ? "text" : "password"} className={`${input} pr-10`} value={v.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" />
+                <input
+                  type={showPw ? "text" : "password"}
+                  className={`${input} pr-10`}
+                  value={v.password}
+                  onChange={(e) => set("password", e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={isNew ? "" : "Deixe em branco para manter a atual"}
+                />
                 <button type="button" onClick={() => setShowPw(!showPw)} aria-label={showPw ? "Ocultar senha" : "Mostrar senha"} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-ink">
                   {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
-              {err("password")}
+              {err("password") ?? <p className="mt-1 text-[11px] text-muted">A senha fica guardada de forma criptografada. Anote antes de enviar à cliente.</p>}
             </Field>
             <Field label="Link da pasta no Drive">
               <input type="url" className={input} value={v.driveUrl} onChange={(e) => set("driveUrl", e.target.value)} placeholder="https://drive.google.com/…" />
@@ -200,15 +211,17 @@ export default function ClientForm({ client, onClose, onCreated }: {
 
         <div className="flex justify-end gap-2 border-t border-mist bg-cream px-5 py-3 md:px-6">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" variant="primary"><Check size={15} /> {isNew ? "Cadastrar cliente" : "Salvar alterações"}</Button>
+          <Button type="submit" variant="primary" disabled={saving}>
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {isNew ? "Cadastrar cliente" : "Salvar alterações"}
+          </Button>
         </div>
       </form>
     </div>
   );
 }
 
-/** Reduz a foto para 320px (quadrado, recorte central) para manter o protótipo leve. */
-function resizeImage(file: File): Promise<string> {
+/** Reduz a foto para 320px (quadrado, recorte central). */
+function resizeImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -222,7 +235,7 @@ function resizeImage(file: File): Promise<string> {
       if (!ctx) return reject(new Error("canvas"));
       ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
       URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("imagem"))), "image/jpeg", 0.85);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("imagem inválida")); };
     img.src = url;
@@ -234,7 +247,7 @@ export function initialsOf(name: string) {
 }
 
 function AvatarField({ name, color, value, onChange }: {
-  name: string; color: string; value?: string; onChange: (v: string | undefined) => void;
+  name: string; color: string; value?: string; onChange: (preview: string | undefined, blob: Blob | null) => void;
 }) {
   const [error, setError] = useState("");
   const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -243,7 +256,8 @@ function AvatarField({ name, color, value, onChange }: {
     if (!file) return;
     if (!file.type.startsWith("image/")) { setError("Escolha um arquivo de imagem."); return; }
     try {
-      onChange(await resizeImage(file));
+      const blob = await resizeImage(file);
+      onChange(URL.createObjectURL(blob), blob);
       setError("");
     } catch {
       setError("Não foi possível ler essa imagem.");
@@ -265,7 +279,7 @@ function AvatarField({ name, color, value, onChange }: {
             <input type="file" accept="image/*" className="sr-only" onChange={pick} />
           </label>
           {value && (
-            <button type="button" onClick={() => onChange(undefined)} className="rounded-xl px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
+            <button type="button" onClick={() => onChange(undefined, null)} className="rounded-xl px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
               Remover
             </button>
           )}

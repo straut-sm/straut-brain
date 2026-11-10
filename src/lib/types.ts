@@ -9,6 +9,8 @@ export type Status =
 
 export type Author = "Straut" | "Cliente";
 
+export type Role = "straut" | "cliente";
+
 export type FileKind = "contrato" | "apresentacao" | "documento" | "video" | "foto";
 
 export interface ClientFile {
@@ -16,8 +18,7 @@ export interface ClientFile {
   name: string;
   kind: FileKind;
   size: string;
-  /** Data de envio (ISO). */
-  at?: string;
+  at: string;
 }
 
 export interface Client {
@@ -29,16 +30,15 @@ export interface Client {
   color: string;
   /** Quantidade de postagens por mês, conforme contrato */
   contractPosts: number;
-  /** Dia do mês do pagamento (1–31) */
+  /** Dia do mês do pagamento (1–31). 0 na visão da cliente (não é exibido). */
   paymentDay: number;
-  /** Senha da página compartilhada com a cliente */
-  password: string;
   driveUrl: string;
   /** Página ativa. Desativada = contrato cancelado: o link deixa de funcionar. */
   active: boolean;
+  /** Observações internas — vazio na visão da cliente. */
   notes: string;
-  /** Foto de perfil (data URL no protótipo; arquivo no servidor na versão funcional). */
-  avatar?: string;
+  /** Link temporário da foto de perfil. */
+  avatarUrl?: string;
   files: ClientFile[];
 }
 
@@ -75,6 +75,14 @@ export interface Comment {
   seen: boolean;
 }
 
+export type MediaKind = "video" | "cover" | "image";
+
+export interface MediaItem {
+  id: string;
+  kind: MediaKind;
+  url: string;
+}
+
 export interface Block {
   id: string;
   clientId: string;
@@ -84,11 +92,23 @@ export interface Block {
   status: Status;
   caption: string;
   script: string;
-  /** Quantidade de slides (carrossel) — mídias são placeholders no protótipo. */
-  slides: number;
-  /** Variação visual do placeholder de mídia. */
+  media: MediaItem[];
+  /** Variação de cor do espaço reservado quando ainda não há mídia. */
   hue: number;
   history: HistoryEntry[];
   suggestion?: Suggestion;
   comments: Comment[];
+}
+
+export interface ClientInput {
+  name: string;
+  specialty: string;
+  color: string;
+  contractPosts: number;
+  paymentDay: number;
+  driveUrl: string;
+  notes: string;
+  active: boolean;
+  /** Nova senha da página. Vazio = manter a atual (na edição). */
+  password: string;
 }

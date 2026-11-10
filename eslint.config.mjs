@@ -20,6 +20,10 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    // Mídias vêm de links assinados temporários do Supabase; <img> simples é o adequado.
+    rules: { "@next/next/no-img-element": "off" },
+  },
 ];
 
 export default eslintConfig;

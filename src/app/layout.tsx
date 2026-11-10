@@ -1,8 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Bai_Jamjuree, Poppins } from "next/font/google";
-import { Suspense } from "react";
-import { StoreProvider } from "@/lib/store";
-import ModeSwitch from "@/components/ModeSwitch";
 import "./globals.css";
 
 const bai = Bai_Jamjuree({
@@ -18,8 +15,9 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Straut Brain",
-  description: "Controle de conteúdos e clientes da Straut Marketing",
+  title: "Straut",
+  description: "Conteúdos e aprovações — Straut Marketing",
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
@@ -31,14 +29,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="pt-BR">
-      <body className={`${bai.variable} ${poppins.variable} antialiased`}>
-        <StoreProvider>
-          {children}
-          <Suspense>
-            <ModeSwitch />
-          </Suspense>
-        </StoreProvider>
-      </body>
+      <body className={`${bai.variable} ${poppins.variable} antialiased`}>{children}</body>
     </html>
   );
 }

@@ -37,10 +37,16 @@ export default function BlockModal({
     };
   }, [onClose]);
 
-  // A Straut, ao abrir, marca comentários da cliente como lidos
+  // A Straut, ao abrir, marca comentários da cliente como lidos (uma vez por abertura)
+  const marked = useRef(false);
+  const hasUnseen = !!block?.comments.some((c) => !c.seen);
+  const { markCommentsSeen } = store;
   useEffect(() => {
-    if (mode === "straut" && block?.comments.some((c) => !c.seen)) store.markCommentsSeen(block.id);
-  }, [mode, block, store]);
+    if (mode === "straut" && hasUnseen && !marked.current) {
+      marked.current = true;
+      markCommentsSeen(blockId);
+    }
+  }, [mode, hasUnseen, blockId, markCommentsSeen]);
 
   if (!block) return null;
   const primary: "caption" | "script" = block.format === "roteiro" ? "script" : "caption";
@@ -50,7 +56,7 @@ export default function BlockModal({
     setEditing(kind);
   };
   const save = () => {
-    if (editing === "straut") store.updateBlock(block.id, "Straut", draft);
+    if (editing === "straut") store.updateBlock(block.id, draft);
     if (editing === "suggest") store.suggest(block.id, primary, draft[primary]);
     setEditing(null);
   };
@@ -281,17 +287,17 @@ function Actions({ block, mode, onSuggest }: { block: Block; mode: ModalMode; on
     return (
       <div className="flex flex-wrap gap-2">
         {block.status === "em_producao" && (
-          <Button variant="primary" onClick={() => store.setStatus(block.id, "aguardando_aprovacao", "Straut", "Enviado para aprovação")}>
+          <Button variant="primary" onClick={() => store.setStatus(block.id, "aguardando_aprovacao")}>
             <Send size={14} /> Enviar para aprovação
           </Button>
         )}
         {block.status === "aprovado" && block.format !== "roteiro" && (
-          <Button variant="primary" onClick={() => store.setStatus(block.id, "publicado", "Straut", "Marcado como publicado")}>
+          <Button variant="primary" onClick={() => store.setStatus(block.id, "publicado")}>
             <Check size={15} /> Marcar como publicado
           </Button>
         )}
         {block.status === "publicado" && (
-          <Button variant="ghost" onClick={() => store.setStatus(block.id, "aprovado", "Straut", "Publicação desfeita")}>
+          <Button variant="ghost" onClick={() => store.setStatus(block.id, "aprovado")}>
             Desfazer publicação
           </Button>
         )}
@@ -381,13 +387,12 @@ function TextSection({
   );
 }
 
-function Comments({ block, mode }: { block: Block; mode: ModalMode }) {
+function Comments({ block }: { block: Block; mode: ModalMode }) {
   const store = useStore();
   const [text, setText] = useState("");
-  const me = mode === "straut" ? "Straut" : "Cliente";
   const send = () => {
     if (!text.trim()) return;
-    store.addComment(block.id, me, text.trim());
+    store.addComment(block.id, text.trim());
     setText("");
   };
   return (
