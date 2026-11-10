@@ -7,7 +7,7 @@ import {
 import FeedView from "@/components/FeedView";
 import ClientForm from "@/components/ClientForm";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Client, FileKind } from "@/lib/types";
@@ -21,7 +21,6 @@ import { Button, Logo, SectionTitle, StatusDot } from "@/components/ui";
 export default function ClientView({ slug, mode }: { slug: string; mode: "straut" | "cliente" }) {
   const params = useSearchParams();
   const pathname = usePathname();
-  const router = useRouter();
   const store = useStore();
   const client = store.getClient(slug);
   const isClient = mode === "cliente";
@@ -39,7 +38,8 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   const setOpen = (id: string | null) => {
     const p = new URLSearchParams(params.toString());
     if (id) p.set("bloco", id); else p.delete("bloco");
-    router.replace(`${pathname}${p.toString() ? `?${p}` : ""}`, { scroll: false });
+    // Só muda o endereço no navegador (sem pedir a página de novo ao servidor)
+    window.history.replaceState(null, "", `${pathname}${p.toString() ? `?${p}` : ""}`);
   };
 
   // Ao abrir um bloco pelo link (ex.: "Precisa da sua atenção"), vai para o mês dele

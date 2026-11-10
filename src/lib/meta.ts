@@ -22,3 +22,10 @@ export function statusLabel(status: Status, format: Format): string {
   if (format === "roteiro" && status === "aprovado") return "Roteiro aprovado";
   return STATUSES[status].label;
 }
+
+/** Tom de cor estável derivado do id do bloco (usado nas artes de exemplo). */
+export function hueOf(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 360;
+}

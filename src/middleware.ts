@@ -18,7 +18,8 @@ export async function middleware(request: NextRequest) {
       },
     },
   );
-  await supabase.auth.getUser();
+  // Confere o login localmente e renova a sessão só quando estiver vencendo.
+  await supabase.auth.getClaims();
   return response;
 }
 

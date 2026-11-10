@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "./supabase/admin";
+import { hueOf } from "./meta";
 import type { Block, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -30,12 +31,6 @@ async function signMany(bucket: string, paths: string[]): Promise<Map<string, st
     });
   }
   return out;
-}
-
-function hueOf(id: string) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return h % 360;
 }
 
 export function formatSize(bytes: number) {
@@ -107,7 +102,15 @@ export async function loadAll() {
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-  return { clients: await mapClients(clients ?? [], "straut"), blocks: await mapBlocks(blocks ?? []) };
+  const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [])]);
+  return { clients: c, blocks: b };
+}
+
+/** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
+export async function loadBlock(id: string): Promise<Block | null> {
+  const { data, error } = await db().from("blocks").select(BLOCK_COLS).eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? (await mapBlocks([data]))[0] : null;
 }
 
 /** Uma cliente pelo endereço (slug), sem conferir acesso. */
@@ -124,5 +127,6 @@ export async function loadClient(clientId: string, role: Role) {
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-  return { clients: await mapClients([client], role), blocks: await mapBlocks(blocks ?? []) };
+  const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [])]);
+  return { clients: c, blocks: b };
 }

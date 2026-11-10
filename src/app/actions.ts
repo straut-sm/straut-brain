@@ -8,7 +8,8 @@ import { AccessError, clientCookieName, makeClientToken, requireAdmin, requireCl
 import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
 import { FORMATS } from "@/lib/meta";
-import type { ClientInput, FileKind, Format, MediaKind, Snapshot, Status } from "@/lib/types";
+import { loadBlock } from "@/lib/data";
+import type { Block, ClientInput, FileKind, Format, MediaKind, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -83,40 +84,51 @@ export async function clientLogin(slug: string, password: string): Promise<Resul
 // Blocos
 // ---------------------------------------------------------------------------
 
-export async function createBlock(clientId: string, date: string): Promise<Result<string>> {
+// Cada ação devolve o bloco atualizado: a tela troca só aquele bloco, sem recarregar o painel.
+type BlockResult = Promise<Result<Block | null>>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** O id vem do navegador para o bloco aparecer na hora, antes de o servidor responder. */
+export async function createBlock(id: string, clientId: string, date: string): BlockResult {
   return run(async () => {
+    if (!UUID.test(id)) throw new AccessError("Identificador inválido.");
     await requireAdmin();
-    const { data, error } = await db().from("blocks").insert({ client_id: clientId, date }).select("id").single();
+    const { error } = await db().from("blocks").insert({ id, client_id: clientId, date });
     if (error) throw error;
-    await log(data.id, "Straut", "Bloco criado como Roteiro");
-    return data.id as string;
+    await log(id, "Straut", "Bloco criado como Roteiro");
+    return loadBlock(id);
   });
 }
 
 const FIELD_NAMES: Record<string, string> = { title: "título", caption: "legenda", script: "roteiro", date: "data de postagem" };
 
-export async function updateBlock(id: string, patch: { title?: string; caption?: string; script?: string; date?: string }): Promise<Result> {
+export async function updateBlock(id: string, patch: { title?: string; caption?: string; script?: string; date?: string }): BlockResult {
   return run(async () => {
-    await requireAdmin();
-    const b = await getBlock(id);
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
     const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== undefined && patch[k] !== b[k]);
-    if (!changed.length) return null;
-    const clean = Object.fromEntries(changed.map((k) => [k, patch[k]]));
-    await update("blocks", id, clean);
-    await log(id, "Straut", `Editou ${changed.map((k) => FIELD_NAMES[k]).join(", ")}`, snap(b));
-    return null;
+    if (changed.length) {
+      const clean = Object.fromEntries(changed.map((k) => [k, patch[k]]));
+      await Promise.all([
+        update("blocks", id, clean),
+        log(id, "Straut", `Editou ${changed.map((k) => FIELD_NAMES[k]).join(", ")}`, snap(b)),
+      ]);
+    }
+    return loadBlock(id);
   });
 }
 
-export async function changeFormat(id: string, format: Format): Promise<Result> {
+export async function changeFormat(id: string, format: Format): BlockResult {
   return run(async () => {
-    await requireAdmin();
     if (!(format in FORMATS)) throw new AccessError("Formato inválido.");
-    const b = await getBlock(id);
-    if (b.format === format) return null;
-    await update("blocks", id, { format });
-    await log(id, "Straut", `Formato alterado de ${FORMATS[b.format as Format].label} para ${FORMATS[format].label}`, snap(b));
-    return null;
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    if (b.format !== format) {
+      await Promise.all([
+        update("blocks", id, { format }),
+        log(id, "Straut", `Formato alterado de ${FORMATS[b.format as Format].label} para ${FORMATS[format].label}`, snap(b)),
+      ]);
+    }
+    return loadBlock(id);
   });
 }
 
@@ -126,79 +138,85 @@ const STATUS_ACTIONS: Partial<Record<Status, string>> = {
   aprovado: "Publicação desfeita",
 };
 
-export async function setStatus(id: string, status: Status): Promise<Result> {
+export async function setStatus(id: string, status: Status): BlockResult {
   return run(async () => {
-    await requireAdmin();
     const action = STATUS_ACTIONS[status];
     if (!action) throw new AccessError("Status inválido.");
-    await getBlock(id);
-    await update("blocks", id, { status });
-    await log(id, "Straut", action);
-    return null;
+    await Promise.all([requireAdmin(), getBlock(id)]);
+    await Promise.all([update("blocks", id, { status }), log(id, "Straut", action)]);
+    return loadBlock(id);
   });
 }
 
-export async function approve(id: string): Promise<Result> {
+export async function approve(id: string): BlockResult {
   return run(async () => {
     const b = await getBlock(id);
     const who = await requireClientAccess(b.client_id);
     if (b.status !== "aguardando_aprovacao") throw new AccessError("Este conteúdo não está aguardando aprovação.");
-    await update("blocks", id, { status: "aprovado" });
-    await log(id, who, b.format === "roteiro" ? "Roteiro aprovado" : "Post aprovado");
-    return null;
+    await Promise.all([
+      update("blocks", id, { status: "aprovado" }),
+      log(id, who, b.format === "roteiro" ? "Roteiro aprovado" : "Post aprovado"),
+    ]);
+    return loadBlock(id);
   });
 }
 
-export async function suggest(id: string, field: "caption" | "script", proposed: string): Promise<Result> {
+export async function suggest(id: string, field: "caption" | "script", proposed: string): BlockResult {
   return run(async () => {
     const b = await getBlock(id);
     const who = await requireClientAccess(b.client_id);
     if (field !== "caption" && field !== "script") throw new AccessError("Campo inválido.");
     if (b.status !== "aguardando_aprovacao") throw new AccessError("Este conteúdo não está aguardando aprovação.");
-    if (proposed.trim() === String(b[field]).trim()) return null;
-    await update("blocks", id, {
-      status: "ajuste_sugerido",
-      suggestion: { field, original: b[field], proposed, at: new Date().toISOString() },
-    });
-    await log(id, who, `Sugeriu alteração ${field === "caption" ? "na legenda" : "no roteiro"}`);
-    return null;
-  });
-}
-
-export async function resolveSuggestion(id: string, accept: boolean): Promise<Result> {
-  return run(async () => {
-    await requireAdmin();
-    const b = await getBlock(id);
-    if (!b.suggestion) return null;
-    if (accept) {
-      await update("blocks", id, { [b.suggestion.field]: b.suggestion.proposed, suggestion: null, status: "aprovado" });
-      await log(id, "Straut", "Aceitou a sugestão da cliente", snap(b));
-    } else {
-      await update("blocks", id, { suggestion: null, status: "aguardando_aprovacao" });
-      await log(id, "Straut", "Recusou a sugestão da cliente");
+    if (proposed.trim() !== String(b[field]).trim()) {
+      await Promise.all([
+        update("blocks", id, {
+          status: "ajuste_sugerido",
+          suggestion: { field, original: b[field], proposed, at: new Date().toISOString() },
+        }),
+        log(id, who, `Sugeriu alteração ${field === "caption" ? "na legenda" : "no roteiro"}`),
+      ]);
     }
-    return null;
+    return loadBlock(id);
   });
 }
 
-export async function addComment(id: string, text: string): Promise<Result> {
+export async function resolveSuggestion(id: string, accept: boolean): BlockResult {
+  return run(async () => {
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    if (b.suggestion) {
+      await Promise.all(accept
+        ? [
+            update("blocks", id, { [b.suggestion.field]: b.suggestion.proposed, suggestion: null, status: "aprovado" }),
+            log(id, "Straut", "Aceitou a sugestão da cliente", snap(b)),
+          ]
+        : [
+            update("blocks", id, { suggestion: null, status: "aguardando_aprovacao" }),
+            log(id, "Straut", "Recusou a sugestão da cliente"),
+          ]);
+    }
+    return loadBlock(id);
+  });
+}
+
+export async function addComment(id: string, text: string): BlockResult {
   return run(async () => {
     const b = await getBlock(id);
     const who = await requireClientAccess(b.client_id);
     const t = text.trim().slice(0, 4000);
-    if (!t) return null;
-    const { error } = await db().from("block_comments").insert({ block_id: id, author: who, text: t, seen: who === "Straut" });
-    if (error) throw error;
-    return null;
+    if (t) {
+      const { error } = await db().from("block_comments").insert({ block_id: id, author: who, text: t, seen: who === "Straut" });
+      if (error) throw error;
+    }
+    return loadBlock(id);
   });
 }
 
-export async function markCommentsSeen(id: string): Promise<Result> {
+export async function markCommentsSeen(id: string): BlockResult {
   return run(async () => {
     await requireAdmin();
     const { error } = await db().from("block_comments").update({ seen: true }).eq("block_id", id).eq("seen", false);
     if (error) throw error;
-    return null;
+    return loadBlock(id);
   });
 }
 
@@ -206,9 +224,9 @@ export async function deleteBlock(id: string): Promise<Result> {
   return run(async () => {
     await requireAdmin();
     const { data: media } = await db().from("block_media").select("path").eq("block_id", id);
-    if (media?.length) await db().storage.from("midia").remove(media.map((m) => m.path));
     const { error } = await db().from("blocks").delete().eq("id", id);
     if (error) throw error;
+    if (media?.length) await db().storage.from("midia").remove(media.map((m) => m.path));
     return null;
   });
 }
@@ -309,7 +327,7 @@ export async function createUploadUrl(target: UploadTarget): Promise<Result<{ bu
   });
 }
 
-export async function attachMedia(blockId: string, kind: MediaKind, paths: string[]): Promise<Result> {
+export async function attachMedia(blockId: string, kind: MediaKind, paths: string[]): BlockResult {
   return run(async () => {
     await requireAdmin();
     const b = await getBlock(blockId);
@@ -329,11 +347,11 @@ export async function attachMedia(blockId: string, kind: MediaKind, paths: strin
     if (error) throw error;
     const label = { video: "Enviou o vídeo", cover: "Enviou a capa", image: paths.length > 1 ? `Enviou ${paths.length} imagens` : "Enviou imagem" }[kind];
     await log(blockId, "Straut", label);
-    return null;
+    return loadBlock(blockId);
   });
 }
 
-export async function removeMedia(mediaId: string): Promise<Result> {
+export async function removeMedia(mediaId: string): BlockResult {
   return run(async () => {
     await requireAdmin();
     const { data: m } = await db().from("block_media").select("id, path, block_id").eq("id", mediaId).single();
@@ -341,7 +359,7 @@ export async function removeMedia(mediaId: string): Promise<Result> {
     await db().storage.from("midia").remove([m.path]);
     await db().from("block_media").delete().eq("id", mediaId);
     await log(m.block_id, "Straut", "Removeu uma mídia");
-    return null;
+    return loadBlock(m.block_id);
   });
 }
 

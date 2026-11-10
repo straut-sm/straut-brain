@@ -7,14 +7,27 @@ import { authClient } from "./supabase/server";
 
 export class AccessError extends Error {}
 
+// Quem é administrador muda raramente: guarda a resposta por alguns minutos.
+const ADMIN_TTL = 5 * 60 * 1000;
+const adminCache = new Map<string, { admin: boolean; until: number }>();
+
+async function isAdmin(userId: string) {
+  const hit = adminCache.get(userId);
+  if (hit && hit.until > Date.now()) return hit.admin;
+  const { data: row } = await db().from("admins").select("user_id").eq("user_id", userId).maybeSingle();
+  adminCache.set(userId, { admin: !!row, until: Date.now() + ADMIN_TTL });
+  return !!row;
+}
+
 /** Usuária logada da Straut, se estiver na lista de administradores. */
 export const getAdmin = cache(async () => {
   const supabase = await authClient();
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user) return null;
-  const { data: row } = await db().from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
-  return row ? { id: user.id, email: user.email ?? "" } : null;
+  // getClaims confere a assinatura do login (chave pública do Supabase) aqui no servidor,
+  // sem uma ida ao Supabase a cada clique.
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  if (!claims?.sub) return null;
+  return (await isAdmin(claims.sub)) ? { id: claims.sub, email: String(claims.email ?? "") } : null;
 });
 
 export async function requireAdmin() {
