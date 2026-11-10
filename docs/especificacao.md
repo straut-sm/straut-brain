@@ -105,8 +105,52 @@ Página inicial da Straut, vem antes das páginas das clientes e reúne tudo.
 
 **Postado:** marcação manual pela Straut (integração com Instagram fica para uma fase futura).
 
+## Gestão de clientes — ✅ aprovada (protótipo)
+
+- Botão **"+ Nova cliente"** ao lado de "Clientes ativas" no painel
+- Ícone de **gestão** em cada card de cliente (e botão "Gestão" na página da cliente, modo Straut)
+- **Foto da cliente** (recorte quadrado), exibida na visualização de feed; sem foto, mostra as iniciais
+- Campos: nome, nicho/especialidade, posts por mês (contrato), **dia de pagamento**, senha da página,
+  link do Drive, cor no calendário, observações internas (não aparecem para a cliente)
+- **Desativar página** (contrato cancelado): pede confirmação; a cliente perde acesso ao link
+  ("página não está mais disponível"), sai do painel, do calendário geral e das barras de progresso.
+  Conteúdos e histórico ficam guardados. Desativadas aparecem em "Páginas desativadas" e podem ser
+  reativadas com a mesma senha.
+
+## Arquivos da cliente — ✅ aprovado (protótipo)
+
+- No modo Straut, a aba **Arquivos** tem a área **"Adicionar documento"**: tipo (automático, contrato,
+  apresentação, documento, vídeo, foto) + **Escolher arquivos** (vários de uma vez)
+- O tipo automático é definido pelo arquivo: vídeo, imagem, nome com "contrato", .ppt/.key ou "apresenta"
+- Cada arquivo tem um botão para remover (com confirmação) — só a Straut vê
+- A cliente vê somente a lista para baixar e o link do Drive
+
+## Pop-up de Reels
+
+- O título aparece só no cabeçalho do pop-up, e não mais sobre o vídeo.
+
+## Visualização de feed — ✅ aprovada (protótipo)
+
+- Botão **"Visualização de feed"** ao lado do título do calendário na página da cliente
+- Pop-up no formato de perfil do Instagram: grade de 3 colunas, só a imagem do post
+  (capa do Reels, 1ª imagem do carrossel ou a foto), do mais recente (topo) ao mais antigo
+- Miniaturas sem título por cima, só a imagem, como no Instagram
+- Ícone de formato (Reels/Carrossel), data e bolinha de status em cada miniatura
+- Filtro: todos os planejados / só aprovados. Clicar na miniatura abre o pop-up do post.
+
+## Ajustes visuais feitos após o primeiro teste
+
+- Removido "Brain" ao lado do logo
+- Painel lateral alinhado com o calendário geral (filtros movidos para dentro do cartão do calendário)
+
+## Mobile — protótipo disponível para avaliação
+
+A ideia da seção "Mobile" acima já está implementada no protótipo e aguarda a aprovação do Guilherme.
+
 ---
 
-## Próximos rascunhos
+## Próximos passos
 
-- [ ] (aguardando)
+- [ ] Feedback final do protótipo
+- [ ] Etapa 2: banco de dados, login da Straut, senha por cliente no servidor, upload de mídia,
+      publicação na internet

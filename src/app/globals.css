@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/* Identidade visual Straut — Manual da Identidade Visual */
+@theme {
+  --color-ink: #1c1c1c;
+  --color-graphite: #424241;
+  --color-sand: #ddd4ca;
+  --color-cream: #f7f5f2;
+  --color-mist: #e8e7e6;
+  --color-paper: #fffefd;
+  --color-muted: #8a8580;
+
+  --font-display: var(--font-bai), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-sand);
+}
+
+/* Barra de rolagem discreta */
+.thin-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--color-sand); border-radius: 999px; }
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-pop { animation: pop-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-fade { animation: fade-in 0.18s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop, .animate-fade { animation: none; }
+}
