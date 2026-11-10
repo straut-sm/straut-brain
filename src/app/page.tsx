@@ -22,7 +22,8 @@ export default function ControlPage() {
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const [kind, setKind] = useState<Kind>("todos");
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  /** Clientes selecionadas no filtro. Vazio = todas visíveis. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [form, setForm] = useState<null | "new" | string>(null);
@@ -35,9 +36,9 @@ export default function ControlPage() {
 
   const filtered = useMemo(
     () => activeBlocks.filter((b) =>
-      !hidden.has(b.clientId) &&
+      (selected.size === 0 || selected.has(b.clientId)) &&
       (kind === "todos" || (kind === "roteiros" ? b.format === "roteiro" : b.format !== "roteiro"))),
-    [activeBlocks, hidden, kind],
+    [activeBlocks, selected, kind],
   );
 
   const attention = useMemo(() => {
@@ -62,11 +63,13 @@ export default function ControlPage() {
     } catch { /* ignora */ }
   };
 
+  // 1º clique: mostra só aquela cliente. Cliques seguintes somam ou retiram clientes.
+  // Quando todas (ou nenhuma) ficam selecionadas, volta a mostrar todas.
   const toggleClient = (id: string) =>
-    setHidden((h) => {
-      const n = new Set(h);
+    setSelected((s) => {
+      const n = new Set(s);
       if (n.has(id)) n.delete(id); else n.add(id);
-      return n;
+      return n.size === active.length ? new Set() : n;
     });
 
   const editing = form && form !== "new" ? store.clientById(form) : undefined;
@@ -180,7 +183,7 @@ export default function ControlPage() {
               toolbar={
                 <div className="flex flex-wrap items-center gap-1.5">
                   {active.map((c) => {
-                    const on = !hidden.has(c.id);
+                    const on = selected.size === 0 || selected.has(c.id);
                     return (
                       <button
                         key={c.id}
@@ -193,6 +196,11 @@ export default function ControlPage() {
                       </button>
                     );
                   })}
+                  {selected.size > 0 && (
+                    <button onClick={() => setSelected(new Set())} className="rounded-full px-2.5 py-1 text-xs font-medium text-graphite underline-offset-2 hover:underline">
+                      Mostrar todas
+                    </button>
+                  )}
                   <span className="ml-auto text-xs text-muted">
                     {filtered.filter((b) => inMonth(b.date, ym.y, ym.m)).length} itens em {MONTHS[ym.m].toLowerCase()}
                   </span>

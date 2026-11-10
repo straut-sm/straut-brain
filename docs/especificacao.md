@@ -96,6 +96,9 @@ Página inicial da Straut, vem antes das páginas das clientes e reúne tudo.
   - Cada cliente tem uma **cor**; o bloco mostra também o **nome da cliente**, além de título,
     formato e status
   - Filtros: posts / roteiros e por cliente
+  - Filtro por cliente: o 1º clique mostra **só** aquela cliente e risca as demais; os cliques seguintes
+    somam ou retiram clientes; quando todas ficam selecionadas (ou nenhuma), volta a mostrar todas.
+    Botão "Mostrar todas" para limpar o filtro.
   - Mesma mecânica de pop-up do bloco, **somente visualização** (sem aprovação)
   - Pop-up mostra: conteúdo, data de postagem, aprovado ou não, postado ou não, legenda
 - Painel lateral: **barra de progresso em camadas** por cliente, com a meta do contrato (ex.: 10/16)
