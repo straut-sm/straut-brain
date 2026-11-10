@@ -11,6 +11,8 @@ import type { Block, Client, ClientInput, FileKind, Format, MediaKind, Role, Sta
 interface Data {
   clients: Client[];
   blocks: Block[];
+  /** Momento em que o servidor gerou estes dados. */
+  loadedAt: number;
 }
 
 interface Store extends Data {
@@ -49,8 +51,15 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
   const [pending, setPending] = useState(0);
   const [refreshing, startTransition] = useTransition();
 
-  // Dados novos do servidor (após router.refresh)
-  useEffect(() => setData(initial), [initial]);
+  // Dados novos do servidor (após router.refresh). O Next às vezes reentrega a cópia
+  // antiga da página (do carregamento inicial); só aceitamos uma cópia mais nova.
+  const applied = useRef(initial.loadedAt);
+  useEffect(() => {
+    if (initial.loadedAt > applied.current) {
+      applied.current = initial.loadedAt;
+      setData(initial);
+    }
+  }, [initial]);
 
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
 

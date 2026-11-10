@@ -103,7 +103,7 @@ export async function loadAll() {
   if (e1) throw e1;
   if (e2) throw e2;
   const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [])]);
-  return { clients: c, blocks: b };
+  return { clients: c, blocks: b, loadedAt: Date.now() };
 }
 
 /** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
@@ -128,5 +128,5 @@ export async function loadClient(clientId: string, role: Role) {
   if (e1) throw e1;
   if (e2) throw e2;
   const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [])]);
-  return { clients: c, blocks: b };
+  return { clients: c, blocks: b, loadedAt: Date.now() };
 }

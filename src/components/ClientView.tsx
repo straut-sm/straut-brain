@@ -7,7 +7,7 @@ import {
 import FeedView from "@/components/FeedView";
 import ClientForm from "@/components/ClientForm";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Client, FileKind } from "@/lib/types";
@@ -20,7 +20,6 @@ import { Button, Logo, SectionTitle, StatusDot } from "@/components/ui";
 /** Página da cliente. mode "straut" = edição (/c/[slug]); "cliente" = link compartilhado (/p/[slug]). */
 export default function ClientView({ slug, mode }: { slug: string; mode: "straut" | "cliente" }) {
   const params = useSearchParams();
-  const pathname = usePathname();
   const store = useStore();
   const client = store.getClient(slug);
   const isClient = mode === "cliente";
@@ -34,13 +33,10 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   const [manageOpen, setManageOpen] = useState(false);
   const calRef = useRef<HTMLDivElement>(null);
 
-  const openId = params.get("bloco");
-  const setOpen = (id: string | null) => {
-    const p = new URLSearchParams(params.toString());
-    if (id) p.set("bloco", id); else p.delete("bloco");
-    // Só muda o endereço no navegador (sem pedir a página de novo ao servidor)
-    window.history.replaceState(null, "", `${pathname}${p.toString() ? `?${p}` : ""}`);
-  };
+  // O pop-up aberto fica só na memória da tela. Mudar o endereço (?bloco=) fazia o Next
+  // remontar a página com os dados do carregamento, desfazendo o que acabou de mudar.
+  // O endereço só é lido na entrada (links do "Precisa da sua atenção").
+  const [openId, setOpen] = useState<string | null>(() => params.get("bloco"));
 
   // Ao abrir um bloco pelo link (ex.: "Precisa da sua atenção"), vai para o mês dele
   useEffect(() => {
