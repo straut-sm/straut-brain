@@ -1,10 +1,11 @@
 "use client";
 
-import { Check, Eye, EyeOff, Loader2, Power, Upload, X } from "lucide-react";
+import { Check, Crop, Eye, EyeOff, Loader2, Power, Upload, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Client, ClientInput } from "@/lib/types";
 import { Button } from "./ui";
+import AvatarCropper from "./AvatarCropper";
 
 export const CLIENT_COLORS = [
   "#b5785c", "#6f846d", "#9a6f8c", "#5f7b98", "#b09452",
@@ -13,7 +14,7 @@ export const CLIENT_COLORS = [
 
 const EMPTY: ClientInput = {
   name: "", specialty: "", contractPosts: 12, paymentDay: 10, color: CLIENT_COLORS[0],
-  driveUrl: "", password: "", active: true, notes: "",
+  driveUrl: "", instagramUrl: "", tiktokUrl: "", password: "", active: true, notes: "",
 };
 
 /** Formulário de nova cliente (client = undefined) ou de gestão de uma cliente existente. */
@@ -31,6 +32,7 @@ export default function ClientForm({ client, onClose }: {
     return {
       name: client.name, specialty: client.specialty, contractPosts: client.contractPosts,
       paymentDay: client.paymentDay, color: client.color, driveUrl: client.driveUrl,
+      instagramUrl: client.instagramUrl, tiktokUrl: client.tiktokUrl,
       password: "", active: client.active, notes: client.notes,
     };
   });
@@ -162,6 +164,12 @@ export default function ClientForm({ client, onClose }: {
             <Field label="Link da pasta no Drive">
               <input type="url" className={input} value={v.driveUrl} onChange={(e) => set("driveUrl", e.target.value)} placeholder="https://drive.google.com/…" />
             </Field>
+            <Field label="Instagram">
+              <input className={input} value={v.instagramUrl} onChange={(e) => set("instagramUrl", e.target.value)} placeholder="@usuario ou link do perfil" />
+            </Field>
+            <Field label="TikTok">
+              <input className={input} value={v.tiktokUrl} onChange={(e) => set("tiktokUrl", e.target.value)} placeholder="@usuario ou link do perfil" />
+            </Field>
             <Field label="Cor da cliente no calendário" className="sm:col-span-2" group>
               <div className="flex flex-wrap gap-2">
                 {CLIENT_COLORS.map((c) => (
@@ -221,27 +229,6 @@ export default function ClientForm({ client, onClose }: {
 }
 
 /** Reduz a foto para 320px (quadrado, recorte central). */
-function resizeImage(file: File): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const size = 320;
-      const s = Math.min(img.width, img.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("canvas"));
-      ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("imagem"))), "image/jpeg", 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("imagem inválida")); };
-    img.src = url;
-  });
-}
-
 export function initialsOf(name: string) {
   return name.replace(/^Dra?\.\s*/, "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 }
@@ -250,17 +237,36 @@ function AvatarField({ name, color, value, onChange }: {
   name: string; color: string; value?: string; onChange: (preview: string | undefined, blob: Blob | null) => void;
 }) {
   const [error, setError] = useState("");
-  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Imagem original (em alta) usada no ajuste; a foto salva é só o recorte.
+  const [original, setOriginal] = useState<string | null>(null);
+  const [cropping, setCropping] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) { setError("Escolha um arquivo de imagem."); return; }
+    setError("");
+    setOriginal(URL.createObjectURL(file));
+    setCropping(true);
+  };
+
+  // Reajustar a foto já salva: baixa a imagem atual para recortar de novo.
+  const adjust = async () => {
+    if (original) { setCropping(true); return; }
+    if (!value) return;
+    setLoading(true);
     try {
-      const blob = await resizeImage(file);
-      onChange(URL.createObjectURL(blob), blob);
+      const res = await fetch(value);
+      if (!res.ok) throw new Error();
+      setOriginal(URL.createObjectURL(await res.blob()));
+      setCropping(true);
       setError("");
     } catch {
-      setError("Não foi possível ler essa imagem.");
+      setError("Não foi possível abrir a foto atual. Envie a foto de novo.");
+    } finally {
+      setLoading(false);
     }
   };
   return (
@@ -279,11 +285,23 @@ function AvatarField({ name, color, value, onChange }: {
             <input type="file" accept="image/*" className="sr-only" onChange={pick} />
           </label>
           {value && (
-            <button type="button" onClick={() => onChange(undefined, null)} className="rounded-xl px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
+            <button type="button" onClick={adjust} disabled={loading} className="inline-flex items-center gap-1.5 rounded-xl border border-sand bg-paper px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream disabled:opacity-50">
+              {loading ? <Loader2 size={13} className="animate-spin" /> : <Crop size={13} />} Ajustar
+            </button>
+          )}
+          {value && (
+            <button type="button" onClick={() => { onChange(undefined, null); setOriginal(null); }} className="rounded-xl px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
               Remover
             </button>
           )}
         </div>
+        {cropping && original && (
+          <AvatarCropper
+            src={original}
+            onCancel={() => setCropping(false)}
+            onDone={(blob) => { onChange(URL.createObjectURL(blob), blob); setCropping(false); }}
+          />
+        )}
         <p className={`mt-1 text-[11px] ${error ? "text-[#b9583a]" : "text-muted"}`}>
           {error || "Aparece na visualização de feed. Sem foto, usamos as iniciais."}
         </p>

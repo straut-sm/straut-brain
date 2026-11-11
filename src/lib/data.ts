@@ -44,7 +44,7 @@ export function formatSize(bytes: number) {
 type Row = Record<string, any>;
 
 const CLIENT_COLS =
-  "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at)";
+  "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, instagram_url, tiktok_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at)";
 const BLOCK_COLS =
   "id, client_id, date, title, format, status, caption, script, suggestion, block_media(id, kind, path, position), block_history(id, at, author, action, before), block_comments(id, at, author, text, seen)";
 
@@ -59,6 +59,8 @@ async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
     contractPosts: r.contract_posts,
     paymentDay: role === "straut" ? r.payment_day : 0,
     driveUrl: r.drive_url,
+    instagramUrl: r.instagram_url ?? "",
+    tiktokUrl: r.tiktok_url ?? "",
     active: r.active,
     notes: role === "straut" ? r.notes : "",
     avatarUrl: r.avatar_path ? avatars.get(r.avatar_path) : undefined,

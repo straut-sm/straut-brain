@@ -33,6 +33,8 @@ export interface Client {
   /** Dia do mês do pagamento (1–31). 0 na visão da cliente (não é exibido). */
   paymentDay: number;
   driveUrl: string;
+  instagramUrl: string;
+  tiktokUrl: string;
   /** Página ativa. Desativada = contrato cancelado: o link deixa de funcionar. */
   active: boolean;
   /** Observações internas — vazio na visão da cliente. */
@@ -107,6 +109,8 @@ export interface ClientInput {
   contractPosts: number;
   paymentDay: number;
   driveUrl: string;
+  instagramUrl: string;
+  tiktokUrl: string;
   notes: string;
   active: boolean;
   /** Nova senha da página. Vazio = manter a atual (na edição). */

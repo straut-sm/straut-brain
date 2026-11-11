@@ -37,6 +37,8 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   // remontar a página com os dados do carregamento, desfazendo o que acabou de mudar.
   // O endereço só é lido na entrada (links do "Precisa da sua atenção").
   const [openId, setOpen] = useState<string | null>(() => params.get("bloco"));
+  // Bloco recém-criado (abre em edição; some se fechar sem alterar nada)
+  const [freshId, setFresh] = useState<string | null>(null);
 
   // Ao abrir um bloco pelo link (ex.: "Precisa da sua atenção"), vai para o mês dele
   useEffect(() => {
@@ -78,7 +80,7 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
 
   const addBlock = async (date: string) => {
     const id = await store.createBlock(client.id, date);
-    if (id) setOpen(id);
+    if (id) { setFresh(id); setOpen(id); }
   };
 
   return (
@@ -135,7 +137,10 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
             <p className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted">
               <span className="h-2 w-2 rounded-full" style={{ background: client.color }} /> {client.specialty}
             </p>
-            <h1 className="font-display text-3xl font-semibold tracking-tight md:text-[44px] md:leading-[1.05]">{client.name}</h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <h1 className="font-display text-3xl font-semibold tracking-tight md:text-[44px] md:leading-[1.05]">{client.name}</h1>
+              <SocialLinks client={client} />
+            </div>
           </div>
 
           {/* Aviso de aprovação */}
@@ -236,7 +241,9 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
         <FeedView client={client} blocks={blocks} onClose={() => setFeedOpen(false)} onOpen={setOpen} paused={!!openId} />
       )}
       {manageOpen && <ClientForm client={client} onClose={() => setManageOpen(false)} />}
-      {openId && <BlockModal blockId={openId} mode={mode} onClose={() => setOpen(null)} />}
+      {openId && (
+        <BlockModal key={openId} blockId={openId} mode={mode} fresh={openId === freshId} onClose={() => { setOpen(null); setFresh(null); }} />
+      )}
     </div>
   );
 }
@@ -370,3 +377,46 @@ function FilesDrawer({ client, onClose, canEdit }: { client: Client; onClose: ()
   );
 }
 
+
+function SocialLinks({ client }: { client: Client }) {
+  const links = [
+    { url: client.instagramUrl, label: "Instagram", icon: <InstagramIcon /> },
+    { url: client.tiktokUrl, label: "TikTok", icon: <TikTokIcon /> },
+  ].filter((l) => l.url);
+  if (!links.length) return null;
+  return (
+    <div className="flex items-center gap-1.5">
+      {links.map((l) => (
+        <a
+          key={l.label}
+          href={l.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${l.label} de ${client.name}`}
+          title={l.label}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-sand text-graphite transition hover:border-graphite/30 hover:bg-cream hover:text-ink"
+        >
+          {l.icon}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function InstagramIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="0.6" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TikTokIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M16.6 3c.3 2.3 1.7 3.9 4 4.1v3.1c-1.5.1-2.8-.4-4-1.2v6.1c0 3.8-3.3 6.4-7 5.6-4.4-1-5.6-6.9-1.7-9.3 1-.6 2.2-.9 3.5-.8v3.2c-.4-.1-.8-.1-1.2 0-1.6.4-2.3 2.4-1.2 3.7 1.1 1.3 3.4.9 3.8-.9.1-.3.1-.6.1-.9V3h3.7z" />
+    </svg>
+  );
+}

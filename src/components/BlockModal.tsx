@@ -6,11 +6,11 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import type { Block, Format, HistoryEntry } from "@/lib/types";
-import { FORMATS, FORMAT_ORDER } from "@/lib/meta";
+import type { Block, Format, HistoryEntry, Status } from "@/lib/types";
+import { FORMATS, FORMAT_ORDER, statusLabel } from "@/lib/meta";
 import { formatDateTime, formatLong } from "@/lib/dates";
 import { wordDiff } from "@/lib/diff";
-import { Button, FormatBadge, StatusPill } from "./ui";
+import { Button, FormatBadge, StatusDot, StatusPill } from "./ui";
 import Media from "./Media";
 
 export type ModalMode = "straut" | "cliente" | "visualizacao";
@@ -18,16 +18,40 @@ export type ModalMode = "straut" | "cliente" | "visualizacao";
 type Draft = { title: string; caption: string; script: string; date: string };
 
 export default function BlockModal({
-  blockId, mode, onClose, showClient = false,
-}: { blockId: string; mode: ModalMode; onClose: () => void; showClient?: boolean }) {
+  blockId, mode, onClose, showClient = false, fresh = false,
+}: {
+  blockId: string; mode: ModalMode; onClose: () => void; showClient?: boolean;
+  /** Bloco acabou de ser criado: abre em edição e é apagado se fechar sem nenhuma alteração. */
+  fresh?: boolean;
+}) {
   const store = useStore();
   const block = store.blocks.find((b) => b.id === blockId);
   const client = block ? store.clientById(block.clientId) : undefined;
-  const [editing, setEditing] = useState<null | "straut" | "suggest">(null);
-  const [draft, setDraft] = useState<Draft>({ title: "", caption: "", script: "", date: "" });
+  const [editing, setEditing] = useState<null | "straut" | "suggest">(fresh && mode === "straut" ? "straut" : null);
+  const [draft, setDraft] = useState<Draft>(() => ({
+    title: block?.title ?? "", caption: block?.caption ?? "", script: block?.script ?? "", date: block?.date ?? "",
+  }));
+  const createdDate = useRef(block?.date);
+
+  const dirty = !!editing && !!block && (Object.keys(draft) as (keyof Draft)[]).some((k) => draft[k] !== block[k]);
+  // Bloco novo que continua exatamente como foi criado
+  const untouched = fresh && !!block && block.title === "Novo conteúdo" && !block.caption && !block.script
+    && block.media.length === 0 && block.format === "roteiro" && block.status === "em_producao"
+    && block.comments.length === 0 && block.date === createdDate.current;
+
+  const pristine = untouched && !dirty;
+
+  const close = () => {
+    if (dirty && !confirm("Sair sem salvar as alterações?")) return;
+    // Bloco novo descartado sem nada salvo: apaga em vez de deixar "Novo conteúdo" no calendário
+    if (untouched && block) store.deleteBlock(block.id);
+    onClose();
+  };
+  const closeRef = useRef(close);
+  closeRef.current = close;
 
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const k = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     window.addEventListener("keydown", k);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -35,7 +59,7 @@ export default function BlockModal({
       window.removeEventListener("keydown", k);
       document.body.style.overflow = prev;
     };
-  }, [onClose]);
+  }, []);
 
   // A Straut, ao abrir, marca comentários da cliente como lidos (uma vez por abertura)
   const marked = useRef(false);
@@ -95,7 +119,11 @@ export default function BlockModal({
         </div>
         <div>
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Status</p>
-          <StatusPill status={block.status} format={block.format} />
+          {editing === "straut" ? (
+            <StatusSelect block={block} onChange={(s) => store.setStatus(block.id, s)} />
+          ) : (
+            <StatusPill status={block.status} format={block.format} />
+          )}
         </div>
       </div>
 
@@ -119,7 +147,7 @@ export default function BlockModal({
   return (
     <div
       className="animate-fade fixed inset-0 z-50 flex items-end justify-center bg-ink/35 backdrop-blur-[2px] md:items-center md:p-6"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
         role="dialog"
@@ -131,7 +159,7 @@ export default function BlockModal({
         <div className="flex items-start gap-3 border-b border-mist px-4 py-3.5 md:px-6">
           <div className="min-w-0 flex-1">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              {mode === "straut" && !editing ? (
+              {mode === "straut" && editing !== "suggest" ? (
                 <FormatSelect value={block.format} onChange={(f) => store.changeFormat(block.id, f)} />
               ) : (
                 <FormatBadge format={block.format} />
@@ -146,6 +174,8 @@ export default function BlockModal({
               <input
                 value={draft.title}
                 onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+                autoFocus={fresh}
+                onFocus={(e) => fresh && e.target.select()}
                 className="w-full rounded-lg border border-sand px-2 py-1 font-display text-xl font-semibold"
                 aria-label="Título"
               />
@@ -158,7 +188,7 @@ export default function BlockModal({
               <Pencil size={14} /> Editar
             </Button>
           )}
-          <button aria-label="Fechar" onClick={onClose} className="rounded-lg p-2 text-graphite hover:bg-cream">
+          <button aria-label="Fechar" onClick={close} className="rounded-lg p-2 text-graphite hover:bg-cream">
             <X size={20} />
           </button>
         </div>
@@ -173,7 +203,7 @@ export default function BlockModal({
               </>
             ) : (
               <>
-                <div><Media block={block} canUpload={mode === "straut"} /></div>
+                <div><Media block={block} canUpload={mode === "straut" && editing === "straut"} /></div>
                 {info}
               </>
             )}
@@ -194,7 +224,7 @@ export default function BlockModal({
                 : "As alterações ficam salvas no histórico do bloco."}
             </p>
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => setEditing(null)}>Cancelar</Button>
+              <Button variant="ghost" onClick={() => (pristine ? close() : setEditing(null))}>Cancelar</Button>
               <Button variant="primary" onClick={save}>
                 {editing === "suggest" ? <><Send size={14} /> Enviar sugestão</> : <><Check size={14} /> Salvar</>}
               </Button>
@@ -252,6 +282,56 @@ function FormatSelect({ value, onChange }: { value: Format; onChange: (f: Format
             );
           })}
           <p className="px-2.5 pb-1.5 pt-1 text-[10.5px] leading-snug text-muted">O conteúdo e o histórico do bloco são mantidos.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SETTABLE: Status[] = ["em_producao", "aguardando_aprovacao", "aprovado", "publicado"];
+
+/** Escolha manual do status (ex.: subir um conteúdo que já foi aprovado ou postado). */
+function StatusSelect({ block, onChange }: { block: Block; onChange: (s: Status) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const options = SETTABLE.filter((s) => !(s === "publicado" && block.format === "roteiro"));
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Alterar status"
+        className="inline-flex items-center gap-1 rounded-full ring-1 ring-sand transition hover:ring-graphite/30"
+      >
+        <StatusPill status={block.status} format={block.format} />
+        <ChevronDown size={12} className="mr-2 text-graphite" />
+      </button>
+      {open && (
+        <div role="listbox" className="animate-fade absolute left-0 top-full z-10 mt-1 w-56 rounded-xl border border-mist bg-paper p-1 shadow-xl">
+          <p className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-wider text-muted">Alterar status</p>
+          {options.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="option"
+              aria-selected={s === block.status}
+              onClick={() => { if (s !== block.status) onChange(s); setOpen(false); }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-cream ${s === block.status ? "font-medium" : ""}`}
+            >
+              <StatusDot status={s} size={8} /> {statusLabel(s, block.format)}
+              {s === block.status && <Check size={14} className="ml-auto" />}
+            </button>
+          ))}
+          {block.status === "ajuste_sugerido" && (
+            <p className="px-2.5 pb-1.5 pt-1 text-[10.5px] leading-snug text-muted">Mudar o status descarta a sugestão pendente da cliente.</p>
+          )}
         </div>
       )}
     </div>

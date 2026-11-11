@@ -123,8 +123,10 @@ export async function changeFormat(id: string, format: Format): BlockResult {
     if (!(format in FORMATS)) throw new AccessError("Formato inválido.");
     const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
     if (b.format !== format) {
+      // Roteiro não tem "Publicado": volta para "Aprovado"
+      const fix = format === "roteiro" && b.status === "publicado" ? { status: "aprovado" } : {};
       await Promise.all([
-        update("blocks", id, { format }),
+        update("blocks", id, { format, ...fix }),
         log(id, "Straut", `Formato alterado de ${FORMATS[b.format as Format].label} para ${FORMATS[format].label}`, snap(b)),
       ]);
     }
@@ -132,18 +134,36 @@ export async function changeFormat(id: string, format: Format): BlockResult {
   });
 }
 
-const STATUS_ACTIONS: Partial<Record<Status, string>> = {
-  aguardando_aprovacao: "Enviado para aprovação",
-  publicado: "Marcado como publicado",
-  aprovado: "Publicação desfeita",
+/** Status que a Straut pode escolher. "Ajuste sugerido" só surge pela sugestão da cliente. */
+const SETTABLE: Status[] = ["em_producao", "aguardando_aprovacao", "aprovado", "publicado"];
+
+const STATUS_LABEL: Record<Status, string> = {
+  em_producao: "Em produção",
+  aguardando_aprovacao: "Aguardando aprovação",
+  ajuste_sugerido: "Ajuste sugerido",
+  aprovado: "Aprovado",
+  publicado: "Publicado",
 };
+
+function statusAction(from: Status, to: Status) {
+  if (to === "aguardando_aprovacao" && from === "em_producao") return "Enviado para aprovação";
+  if (to === "publicado" && from === "aprovado") return "Marcado como publicado";
+  if (to === "aprovado" && from === "publicado") return "Publicação desfeita";
+  return `Status alterado de ${STATUS_LABEL[from]} para ${STATUS_LABEL[to]}`;
+}
 
 export async function setStatus(id: string, status: Status): BlockResult {
   return run(async () => {
-    const action = STATUS_ACTIONS[status];
-    if (!action) throw new AccessError("Status inválido.");
-    await Promise.all([requireAdmin(), getBlock(id)]);
-    await Promise.all([update("blocks", id, { status }), log(id, "Straut", action)]);
+    if (!SETTABLE.includes(status)) throw new AccessError("Status inválido.");
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    if (status === "publicado" && b.format === "roteiro") throw new AccessError("Roteiros não são publicados.");
+    if (b.status !== status) {
+      // Sair de "Ajuste sugerido" pela escolha manual descarta a sugestão pendente
+      await Promise.all([
+        update("blocks", id, b.suggestion ? { status, suggestion: null } : { status }),
+        log(id, "Straut", statusAction(b.status as Status, status)),
+      ]);
+    }
     return loadBlock(id);
   });
 }
@@ -240,6 +260,15 @@ function slugify(name: string) {
     .replace(/^dra?\.?\s+/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "cliente";
 }
 
+/** Aceita "@usuario", "usuario" ou o link completo do perfil. */
+function socialUrl(value: string | undefined, base: string) {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^(www\.)?(instagram|tiktok)\.com/i.test(v)) return `https://${v}`;
+  return base + v.replace(/^@/, "").replace(/\/+$/, "");
+}
+
 export async function saveClient(id: string | null, input: ClientInput): Promise<Result<{ id: string; slug: string }>> {
   return run(async () => {
     await requireAdmin();
@@ -250,6 +279,8 @@ export async function saveClient(id: string | null, input: ClientInput): Promise
       contract_posts: Math.round(input.contractPosts),
       payment_day: Math.round(input.paymentDay),
       drive_url: input.driveUrl.trim(),
+      instagram_url: socialUrl(input.instagramUrl, "https://www.instagram.com/"),
+      tiktok_url: socialUrl(input.tiktokUrl, "https://www.tiktok.com/@"),
       notes: input.notes,
       active: input.active,
     };

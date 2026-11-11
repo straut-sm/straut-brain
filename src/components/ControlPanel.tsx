@@ -1,13 +1,13 @@
 "use client";
 
 import {
-  ArrowUpRight, Bell, Check, ChevronDown, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2,
+  ArrowUpRight, Bell, Check, ChevronDown, ImageOff, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2,
 } from "lucide-react";
 import { signOut } from "@/app/actions";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
-import type { Client } from "@/lib/types";
+import type { Block, Client } from "@/lib/types";
 import { FORMATS } from "@/lib/meta";
 import { MONTHS, formatShort, inMonth } from "@/lib/dates";
 import Calendar, { StatusLegend } from "@/components/Calendar";
@@ -43,11 +43,16 @@ export default function ControlPage() {
   );
 
   const attention = useMemo(() => {
-    const items: { blockId: string; clientId: string; title: string; text: string; icon: "sug" | "com" }[] = [];
+    const items: { blockId: string; clientId: string; title: string; text: string; icon: "sug" | "com" | "file" }[] = [];
     activeBlocks.forEach((b) => {
       if (b.suggestion) items.push({ blockId: b.id, clientId: b.clientId, title: b.title, text: `Sugeriu alteração ${b.suggestion.field === "caption" ? "na legenda" : "no roteiro"}`, icon: "sug" });
       const unseen = b.comments.filter((c) => !c.seen && c.by === "Cliente");
       if (unseen.length) items.push({ blockId: b.id, clientId: b.clientId, title: b.title, text: `“${unseen[unseen.length - 1].text}”`, icon: "com" });
+    });
+    // Posts sem o arquivo final (mais próximos da data primeiro). Publicados ficam de fora.
+    [...activeBlocks].sort((a, b) => a.date.localeCompare(b.date)).forEach((b) => {
+      const missing = missingMedia(b);
+      if (missing) items.push({ blockId: b.id, clientId: b.clientId, title: b.title, text: missing, icon: "file" });
     });
     return items;
   }, [activeBlocks]);
@@ -221,7 +226,7 @@ export default function ControlPage() {
               </SectionTitle>
               <div className="rounded-2xl border border-mist bg-paper">
                 {attention.length === 0 ? (
-                  <p className="flex items-center gap-2 p-4 text-sm text-muted"><Bell size={15} /> Nenhuma sugestão ou comentário novo.</p>
+                  <p className="flex items-center gap-2 p-4 text-sm text-muted"><Bell size={15} /> Nenhuma sugestão, comentário ou arquivo pendente.</p>
                 ) : (
                   <ul className="divide-y divide-mist">
                     {attention.map((a) => {
@@ -230,8 +235,8 @@ export default function ControlPage() {
                       return (
                         <li key={a.blockId + a.icon}>
                           <Link href={`/c/${c.slug}?bloco=${a.blockId}`} className="flex gap-3 p-4 hover:bg-cream/60">
-                            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#f6e3dc] text-[#b9583a]">
-                              {a.icon === "sug" ? <Pencil size={13} /> : <MessageCircle size={13} />}
+                            <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${a.icon === "file" ? "bg-[#f8eedd] text-[#a87021]" : "bg-[#f6e3dc] text-[#b9583a]"}`}>
+                              {a.icon === "sug" ? <Pencil size={13} /> : a.icon === "com" ? <MessageCircle size={13} /> : <ImageOff size={13} />}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[11px] font-semibold uppercase tracking-wide" style={{ color: c.color }}>{c.name}</span>
@@ -316,4 +321,19 @@ function Stat({ n, label, accent = false }: { n: number; label: string; accent?:
       <p className="mt-1 text-[11px] leading-tight text-muted">{label}</p>
     </div>
   );
+}
+
+/** O que falta enviar num post (vazio = está completo). Roteiros e posts publicados não entram. */
+function missingMedia(b: Block): string {
+  if (b.format === "roteiro" || b.status === "publicado") return "";
+  const has = (k: Block["media"][number]["kind"]) => b.media.some((m) => m.kind === k);
+  if (b.format === "reels") {
+    const video = has("video"), cover = has("cover");
+    if (!video && !cover) return "Falta enviar o vídeo e a capa";
+    if (!video) return "Falta enviar o vídeo";
+    if (!cover) return "Falta enviar a capa";
+    return "";
+  }
+  if (!has("image")) return b.format === "carrossel" ? "Falta enviar as imagens do carrossel" : "Falta enviar a foto";
+  return "";
 }

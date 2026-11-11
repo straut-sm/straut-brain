@@ -184,8 +184,12 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       return id; // abre o pop-up na hora
     },
     updateBlock: (id, patch) => blockOp(id, (b) => ({ ...b, ...patch }), () => A.updateBlock(id, patch)),
-    changeFormat: (id, format) => blockOp(id, (b) => ({ ...b, format }), () => A.changeFormat(id, format)),
-    setStatus: (id, status) => blockOp(id, (b) => ({ ...b, status }), () => A.setStatus(id, status)),
+    changeFormat: (id, format) => blockOp(
+      id,
+      (b) => ({ ...b, format, status: format === "roteiro" && b.status === "publicado" ? "aprovado" : b.status }),
+      () => A.changeFormat(id, format),
+    ),
+    setStatus: (id, status) => blockOp(id, (b) => ({ ...b, status, suggestion: undefined }), () => A.setStatus(id, status)),
     approve: (id) => blockOp(id, (b) => ({ ...b, status: "aprovado" }), () => A.approve(id)),
     suggest: (id, field, proposed) => blockOp(
       id,
