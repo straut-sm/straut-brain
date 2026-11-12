@@ -197,6 +197,8 @@ export default function BlockModal({
       className="animate-fade fixed inset-0 z-50 flex items-end justify-center bg-ink/35 backdrop-blur-[2px] md:items-center md:px-20 md:py-6"
       onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
+      {/* As setas ficam presas às laterais do pop-up (não às bordas da tela) */}
+      <div className="relative w-full max-w-5xl">
       {nav}
       <div
         role="dialog"
@@ -307,6 +309,7 @@ export default function BlockModal({
           />
         )}
       </div>
+      </div>
     </div>
   );
 }
@@ -364,7 +367,7 @@ function NavArrow({ side, onClick, pulse = false }: { side: "left" | "right"; on
       disabled={!onClick}
       aria-label={side === "left" ? "Conteúdo anterior" : "Próximo conteúdo"}
       title={side === "left" ? "Anterior (←)" : "Próximo (→)"}
-      className={`absolute top-1/2 z-10 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition disabled:pointer-events-none disabled:opacity-0 md:flex ${side === "left" ? "left-4" : "right-4"} ${pulse && onClick ? "animate-nudge bg-ink text-paper hover:bg-graphite" : "bg-paper text-graphite hover:bg-cream hover:text-ink"}`}
+      className={`absolute top-1/2 z-10 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition disabled:pointer-events-none disabled:opacity-0 md:flex ${side === "left" ? "-left-16" : "-right-16"} ${pulse && onClick ? "animate-nudge bg-ink text-paper hover:bg-graphite" : "bg-paper text-graphite hover:bg-cream hover:text-ink"}`}
     >
       <Icon size={24} />
     </button>
