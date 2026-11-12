@@ -103,9 +103,14 @@ export default function ControlPage() {
             <p className="mb-1 text-sm text-muted">Painel de controle</p>
             <h1 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">Olá, Straut</h1>
           </div>
-          <div className="flex gap-2 text-sm">
+          <div className="flex w-full gap-2 text-sm sm:w-auto">
             <Stat n={pendingClient} label="aguardando cliente" />
-            <Stat n={attention.length} label="pedem sua atenção" accent={attention.length > 0} />
+            <Stat
+              n={attention.length}
+              label="pedem sua atenção"
+              accent={attention.length > 0}
+              onClick={attention.length > 0 ? () => document.getElementById("atencao")?.scrollIntoView({ behavior: "smooth", block: "start" }) : undefined}
+            />
             <Stat n={toPublish} label="prontos para postar" />
           </div>
         </div>
@@ -163,7 +168,7 @@ export default function ControlPage() {
           )}
         </section>
 
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Calendário geral */}
           <section className="min-w-0">
             <SectionTitle>Calendário geral</SectionTitle>
@@ -189,7 +194,8 @@ export default function ControlPage() {
                 </div>
               }
               toolbar={
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <div className="thin-scroll -mx-4 flex items-center gap-1.5 overflow-x-auto px-4 pb-0.5 md:mx-0 md:flex-1 md:flex-wrap md:overflow-visible md:px-0 md:pb-0">
                   {active.map((c) => {
                     const on = selected.size === 0 || selected.has(c.id);
                     return (
@@ -197,7 +203,7 @@ export default function ControlPage() {
                         key={c.id}
                         onClick={() => toggleClient(c.id)}
                         aria-pressed={on}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${on ? "border-sand bg-paper text-ink" : "border-transparent bg-mist/60 text-muted line-through"}`}
+                        className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition ${on ? "border-sand bg-paper text-ink" : "border-transparent bg-mist/60 text-muted line-through"}`}
                       >
                         <span className="h-2 w-2 rounded-full" style={{ background: on ? c.color : "#bdb8b2" }} />
                         {c.name.replace(/^Dra?\. /, "")}
@@ -205,11 +211,12 @@ export default function ControlPage() {
                     );
                   })}
                   {selected.size > 0 && (
-                    <button onClick={() => setSelected(new Set())} className="rounded-full px-2.5 py-1 text-xs font-medium text-graphite underline-offset-2 hover:underline">
+                    <button onClick={() => setSelected(new Set())} className="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium text-graphite underline-offset-2 hover:underline">
                       Mostrar todas
                     </button>
                   )}
-                  <span className="ml-auto text-xs text-muted">
+                </div>
+                  <span className="text-xs text-muted md:ml-auto md:shrink-0">
                     {filtered.filter((b) => inMonth(b.date, ym.y, ym.m)).length} itens em {MONTHS[ym.m].toLowerCase()}
                   </span>
                 </div>
@@ -231,7 +238,7 @@ export default function ControlPage() {
               </div>
             </section>
 
-            <section>
+            <section id="atencao" className="scroll-mt-4">
               <SectionTitle right={attention.length > 0 && <span className="rounded-full bg-[#b9583a] px-2 text-[11px] font-semibold leading-[18px] text-paper">{attention.length}</span>}>
                 Precisa da sua atenção
               </SectionTitle>
@@ -314,13 +321,18 @@ function ClientCard({ client: c, pending, copied, onCopy, onManage }: {
   );
 }
 
-function Stat({ n, label, accent = false }: { n: number; label: string; accent?: boolean }) {
-  return (
-    <div className={`rounded-xl border px-3 py-2 ${accent ? "border-[#ecd3c8] bg-[#fdf8f6]" : "border-mist bg-paper"}`}>
+function Stat({ n, label, accent = false, onClick }: { n: number; label: string; accent?: boolean; onClick?: () => void }) {
+  const cls = `flex-1 rounded-xl border px-3 py-2 text-left sm:flex-none ${accent ? "border-[#ecd3c8] bg-[#fdf8f6]" : "border-mist bg-paper"}`;
+  const body = (
+    <>
       <p className={`font-display text-xl font-semibold leading-none ${accent ? "text-[#b9583a]" : ""}`}>{n}</p>
       <p className="mt-1 text-[11px] leading-tight text-muted">{label}</p>
-    </div>
+    </>
   );
+  // No celular a lista de atenção fica no fim da página: o número leva até ela.
+  return onClick
+    ? <button onClick={onClick} className={`${cls} transition hover:border-[#d9b3a3] lg:pointer-events-none`}>{body}</button>
+    : <div className={cls}>{body}</div>;
 }
 
 /** O que falta enviar num post (vazio = está completo). Roteiros e posts publicados não entram. */
