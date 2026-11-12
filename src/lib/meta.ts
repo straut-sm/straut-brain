@@ -1,5 +1,5 @@
 import { Clapperboard, FileText, GalleryHorizontal, Image as ImageIcon } from "lucide-react";
-import type { Format, Status } from "./types";
+import type { Format, PostFormat, Status } from "./types";
 
 export const FORMATS: Record<Format, { label: string; icon: typeof FileText }> = {
   roteiro: { label: "Roteiro", icon: FileText },
@@ -9,6 +9,10 @@ export const FORMATS: Record<Format, { label: string; icon: typeof FileText }> =
 };
 
 export const FORMAT_ORDER: Format[] = ["roteiro", "reels", "carrossel", "foto"];
+
+/** Como o formato planejado de um roteiro aparece (o roteiro "é de" vídeo, carrossel ou foto). */
+export const PLANNED: Record<PostFormat, string> = { reels: "Vídeo", carrossel: "Carrossel", foto: "Foto" };
+export const PLANNED_ORDER: PostFormat[] = ["reels", "carrossel", "foto"];
 
 export const STATUSES: Record<Status, { label: string; color: string; soft: string }> = {
   em_producao: { label: "Em produção", color: "#a39d96", soft: "#efece8" },

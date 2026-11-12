@@ -10,9 +10,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import type { Client, FileKind } from "@/lib/types";
+import type { Block, Client, FileKind, PostFormat } from "@/lib/types";
 import { MONTHS, formatShort, inMonth, todayYmd } from "@/lib/dates";
-import { statusLabel } from "@/lib/meta";
+import { FORMATS, PLANNED, PLANNED_ORDER, statusLabel } from "@/lib/meta";
 import Calendar, { StatusLegend } from "@/components/Calendar";
 import BlockModal from "@/components/BlockModal";
 import { Button, Logo, SectionTitle, StatusDot } from "@/components/ui";
@@ -36,9 +36,18 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   // O pop-up aberto fica só na memória da tela. Mudar o endereço (?bloco=) fazia o Next
   // remontar a página com os dados do carregamento, desfazendo o que acabou de mudar.
   // O endereço só é lido na entrada (links do "Precisa da sua atenção").
-  const [openId, setOpen] = useState<string | null>(() => params.get("bloco"));
+  const [openId, setOpenId] = useState<string | null>(() => params.get("bloco"));
   // Bloco recém-criado (abre em edição; some se fechar sem alterar nada)
   const [freshId, setFresh] = useState<string | null>(null);
+  // Sequência das setas do pop-up. null = todos os conteúdos do calendário, por data.
+  const [navList, setNavList] = useState<string[] | null>(null);
+  const [scriptFilter, setScriptFilter] = useState<PostFormat | "sem" | "todos">("todos");
+
+  /** Abre um bloco. "list" define a sequência das setas (padrão: calendário inteiro). */
+  const setOpen = (id: string | null, list: string[] | null = null) => {
+    setOpenId(id);
+    setNavList(list);
+  };
 
   // Ao abrir um bloco pelo link (ex.: "Precisa da sua atenção"), vai para o mês dele
   useEffect(() => {
@@ -58,16 +67,33 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
     .sort((a, b) => a.date.localeCompare(b.date));
   const monthPosts = blocks.filter((b) => inMonth(b.date, ym.y, ym.m) && b.format !== "roteiro").length;
 
+  const scriptKey = (b: Block) => b.plannedFormat ?? "sem";
+  const scriptCounts = scripts.reduce<Record<string, number>>((acc, b) => ({ ...acc, [scriptKey(b)]: (acc[scriptKey(b)] ?? 0) + 1 }), {});
+  // Se o formato filtrado deixar de ter roteiros, volta para "Todos"
+  const activeFilter = scriptFilter !== "todos" && scriptCounts[scriptFilter] ? scriptFilter : "todos";
+  const shownScripts = activeFilter === "todos" ? scripts : scripts.filter((b) => scriptKey(b) === activeFilter);
+
+  // Setas do pop-up
+  const calendarOrder = useMemo(
+    () => [...blocks].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).map((b) => b.id),
+    [blocks],
+  );
+  const seq = (navList ?? calendarOrder).filter((id) => blocks.some((b) => b.id === id));
+  const idx = openId ? seq.indexOf(openId) : -1;
+  const step = (d: number) => {
+    const id = seq[idx + d];
+    if (id) { setOpenId(id); setFresh(null); }
+  };
+
   if (!client) return null;
 
+  // Abre direto o primeiro conteúdo que espera aprovação; as setas passam pelos demais pendentes
   const reviewNow = () => {
+    const queue = [...pending].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).map((b) => b.id);
+    if (!queue[0]) return;
+    // Ao fechar, o calendário fica destacando os pendentes
     setFocusPending(true);
-    const first = [...pending].sort((a, b) => a.date.localeCompare(b.date))[0];
-    if (first) {
-      const [y, m] = first.date.split("-").map(Number);
-      setYm({ y, m: m - 1 });
-    }
-    calRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setOpen(queue[0], queue);
   };
 
   const copyLink = async () => {
@@ -172,22 +198,47 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
         {/* Roteiros para a próxima gravação */}
         {scripts.length > 0 && (
           <section className="mb-9">
-            <SectionTitle>Roteiros para a próxima gravação</SectionTitle>
+            <SectionTitle
+              right={
+                Object.keys(scriptCounts).length > 1 && (
+                  <div className="inline-flex flex-wrap gap-1 rounded-xl border border-mist bg-cream/60 p-1" role="group" aria-label="Filtrar roteiros por formato">
+                    {(["todos", ...PLANNED_ORDER, "sem"] as const)
+                      .filter((k) => k === "todos" || scriptCounts[k])
+                      .map((k) => (
+                        <button
+                          key={k}
+                          onClick={() => setScriptFilter(k)}
+                          aria-pressed={activeFilter === k}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${activeFilter === k ? "bg-ink text-paper" : "text-graphite hover:bg-paper"}`}
+                        >
+                          {k === "todos" ? "Todos" : k === "sem" ? "Sem formato" : PLANNED[k]}
+                          <span className="ml-1 opacity-60">{k === "todos" ? scripts.length : scriptCounts[k]}</span>
+                        </button>
+                      ))}
+                  </div>
+                )
+              }
+            >
+              Roteiros para a próxima gravação
+            </SectionTitle>
             <div className="thin-scroll -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:px-0">
-              {scripts.map((s) => (
+              {shownScripts.map((s) => {
+                const Icon = s.plannedFormat ? FORMATS[s.plannedFormat].icon : FileText;
+                return (
                 <button
                   key={s.id}
-                  onClick={() => setOpen(s.id)}
+                  onClick={() => setOpen(s.id, shownScripts.map((x) => x.id))}
                   className="flex w-[260px] shrink-0 snap-start flex-col rounded-2xl border border-mist bg-paper p-4 text-left transition hover:border-sand hover:shadow-[0_6px_20px_-12px_rgba(28,28,28,0.3)] md:w-[300px]"
                 >
                   <span className="mb-3 flex items-center justify-between text-[11px] text-muted">
-                    <span className="inline-flex items-center gap-1.5"><FileText size={13} /> Roteiro · {formatShort(s.date)}</span>
+                    <span className="inline-flex items-center gap-1.5"><Icon size={13} /> {s.plannedFormat ? `Roteiro de ${PLANNED[s.plannedFormat].toLowerCase()}` : "Roteiro"} · {formatShort(s.date)}</span>
                     <span className="inline-flex items-center gap-1.5"><StatusDot status={s.status} size={6} /> {statusLabel(s.status, s.format)}</span>
                   </span>
                   <span className="mb-2 font-display text-lg font-semibold leading-snug">{s.title}</span>
                   <span className="line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-muted">{s.script.split("\n").filter((l) => { const t = l.replace(/\(.*?\)/g, "").trim(); return t && t !== t.toUpperCase(); }).slice(0, 3).join("\n")}</span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
@@ -242,7 +293,16 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
       )}
       {manageOpen && <ClientForm client={client} onClose={() => setManageOpen(false)} />}
       {openId && (
-        <BlockModal key={openId} blockId={openId} mode={mode} fresh={openId === freshId} onClose={() => { setOpen(null); setFresh(null); }} />
+        <BlockModal
+          key={openId}
+          blockId={openId}
+          mode={mode}
+          fresh={openId === freshId}
+          onClose={() => { setOpen(null); setFresh(null); }}
+          onPrev={idx > 0 ? () => step(-1) : undefined}
+          onNext={idx >= 0 && idx < seq.length - 1 ? () => step(1) : undefined}
+          position={idx >= 0 && seq.length > 1 ? `${idx + 1} de ${seq.length}` : undefined}
+        />
       )}
     </div>
   );

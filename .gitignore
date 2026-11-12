@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# fichas das clientes (dados de clientes, ficam só no computador)
+/clientes/

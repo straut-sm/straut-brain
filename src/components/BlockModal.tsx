@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  Check, ChevronDown, Copy, ExternalLink, History, MessageCircle, Pencil, Send, Trash2, X,
+  ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ExternalLink, History, MessageCircle, Pencil,
+  RotateCcw, Send, Trash2, Undo2, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import type { Block, Format, HistoryEntry, Status } from "@/lib/types";
-import { FORMATS, FORMAT_ORDER, statusLabel } from "@/lib/meta";
+import type { Block, Format, HistoryEntry, PostFormat, Status } from "@/lib/types";
+import { FORMATS, FORMAT_ORDER, PLANNED, PLANNED_ORDER, statusLabel } from "@/lib/meta";
 import { formatDateTime, formatLong } from "@/lib/dates";
 import { wordDiff } from "@/lib/diff";
 import { Button, FormatBadge, StatusDot, StatusPill } from "./ui";
@@ -18,11 +19,16 @@ export type ModalMode = "straut" | "cliente" | "visualizacao";
 type Draft = { title: string; caption: string; script: string; date: string };
 
 export default function BlockModal({
-  blockId, mode, onClose, showClient = false, fresh = false,
+  blockId, mode, onClose, showClient = false, fresh = false, onPrev, onNext, position,
 }: {
   blockId: string; mode: ModalMode; onClose: () => void; showClient?: boolean;
   /** Bloco acabou de ser criado: abre em edição e é apagado se fechar sem nenhuma alteração. */
   fresh?: boolean;
+  /** Navegação entre os conteúdos do calendário sem fechar o pop-up. */
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** Ex.: "2 de 5" */
+  position?: string;
 }) {
   const store = useStore();
   const block = store.blocks.find((b) => b.id === blockId);
@@ -41,17 +47,42 @@ export default function BlockModal({
 
   const pristine = untouched && !dirty;
 
-  const close = () => {
+  /** Sai deste bloco (fechar ou ir para outro), conferindo alterações não salvas. */
+  const leave = (then: () => void) => {
     if (dirty && !confirm("Sair sem salvar as alterações?")) return;
     // Bloco novo descartado sem nada salvo: apaga em vez de deixar "Novo conteúdo" no calendário
     if (untouched && block) store.deleteBlock(block.id);
-    onClose();
+    then();
   };
-  const closeRef = useRef(close);
-  closeRef.current = close;
+  const close = () => leave(onClose);
+  const goPrev = onPrev && (() => leave(onPrev));
+  const goNext = onNext && (() => leave(onNext));
+
+  // A cliente acabou de responder este conteúdo: a seta de "próximo" pulsa para chamar a atenção
+  const openedStatus = useRef(block?.status);
+  const answered = mode === "cliente" && openedStatus.current === "aguardando_aprovacao"
+    && (block?.status === "aprovado" || block?.status === "ajuste_sugerido");
+
+  // Último ponto do histórico que pode ser desfeito (Ctrl+Z)
+  const lastVersion = block ? [...block.history].reverse().find((h) => h.before) : undefined;
+  const undo = mode === "straut" && lastVersion && block ? () => store.restoreVersion(block.id, lastVersion.id) : undefined;
+
+  const keys = useRef({ close, goPrev, goNext, undo, editing });
+  keys.current = { close, goPrev, goNext, undo, editing };
 
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
+    const k = (e: KeyboardEvent) => {
+      const { close, goPrev, goNext, undo, editing } = keys.current;
+      if (e.key === "Escape") return close();
+      const t = e.target as HTMLElement | null;
+      if (editing || (t && (t.closest("input, textarea, select, [contenteditable]")))) return;
+      if (e.key === "ArrowLeft" && goPrev) goPrev();
+      else if (e.key === "ArrowRight" && goNext) goNext();
+      else if (undo && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+      }
+    };
     window.addEventListener("keydown", k);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -125,6 +156,16 @@ export default function BlockModal({
             <StatusPill status={block.status} format={block.format} />
           )}
         </div>
+        {block.format === "roteiro" && (mode === "straut" || block.plannedFormat) && (
+          <div className="col-span-2">
+            <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Roteiro de</p>
+            {mode === "straut" && editing !== "suggest" ? (
+              <PlannedPicker value={block.plannedFormat} onChange={(f) => store.setPlannedFormat(block.id, f)} />
+            ) : (
+              <PlannedBadge format={block.plannedFormat!} />
+            )}
+          </div>
+        )}
       </div>
 
       {!editing && <Actions block={block} mode={mode} onSuggest={() => startEdit("suggest")} />}
@@ -144,11 +185,19 @@ export default function BlockModal({
     </div>
   );
 
+  const nav = (onPrev || onNext) && (
+    <>
+      <NavArrow side="left" onClick={goPrev} />
+      <NavArrow side="right" onClick={goNext} pulse={answered} />
+    </>
+  );
+
   return (
     <div
-      className="animate-fade fixed inset-0 z-50 flex items-end justify-center bg-ink/35 backdrop-blur-[2px] md:items-center md:p-6"
+      className="animate-fade fixed inset-0 z-50 flex items-end justify-center bg-ink/35 backdrop-blur-[2px] md:items-center md:px-20 md:py-6"
       onMouseDown={(e) => e.target === e.currentTarget && close()}
     >
+      {nav}
       <div
         role="dialog"
         aria-modal="true"
@@ -188,6 +237,22 @@ export default function BlockModal({
               <Pencil size={14} /> Editar
             </Button>
           )}
+          {(onPrev || onNext) && (
+            <div className="flex items-center md:hidden">
+              <button aria-label="Conteúdo anterior" onClick={goPrev} disabled={!goPrev} className="rounded-lg p-2 text-graphite hover:bg-cream disabled:opacity-30">
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                aria-label="Próximo conteúdo"
+                onClick={goNext}
+                disabled={!goNext}
+                className={`rounded-full p-2 text-graphite hover:bg-cream disabled:opacity-30 ${answered && goNext ? "animate-nudge bg-ink text-paper hover:bg-graphite" : ""}`}
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
+          {position && <span className="hidden self-center text-xs text-muted md:inline">{position}</span>}
           <button aria-label="Fechar" onClick={close} className="rounded-lg p-2 text-graphite hover:bg-cream">
             <X size={20} />
           </button>
@@ -236,6 +301,8 @@ export default function BlockModal({
         {!editing && (
           <HistoryFooter
             history={block.history}
+            onRestore={mode === "straut" ? (hid) => store.restoreVersion(block.id, hid) : undefined}
+            onUndo={undo}
             onDelete={mode === "straut" ? () => { if (confirm("Excluir este bloco? Esta ação não pode ser desfeita.")) { store.deleteBlock(block.id); onClose(); } } : undefined}
           />
         )}
@@ -288,7 +355,56 @@ function FormatSelect({ value, onChange }: { value: Format; onChange: (f: Format
   );
 }
 
-const SETTABLE: Status[] = ["em_producao", "aguardando_aprovacao", "aprovado", "publicado"];
+function NavArrow({ side, onClick, pulse = false }: { side: "left" | "right"; onClick?: () => void; pulse?: boolean }) {
+  const Icon = side === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={onClick}
+      disabled={!onClick}
+      aria-label={side === "left" ? "Conteúdo anterior" : "Próximo conteúdo"}
+      title={side === "left" ? "Anterior (←)" : "Próximo (→)"}
+      className={`absolute top-1/2 z-10 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition disabled:pointer-events-none disabled:opacity-0 md:flex ${side === "left" ? "left-4" : "right-4"} ${pulse && onClick ? "animate-nudge bg-ink text-paper hover:bg-graphite" : "bg-paper text-graphite hover:bg-cream hover:text-ink"}`}
+    >
+      <Icon size={24} />
+    </button>
+  );
+}
+
+function PlannedBadge({ format }: { format: PostFormat }) {
+  const Icon = FORMATS[format].icon;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-sand bg-cream px-2.5 py-1 text-xs font-medium text-graphite">
+      <Icon size={13} strokeWidth={1.8} /> {PLANNED[format]}
+    </span>
+  );
+}
+
+/** Escolha do formato que o roteiro vai virar. */
+function PlannedPicker({ value, onChange }: { value?: PostFormat; onChange: (f: PostFormat | null) => void }) {
+  return (
+    <div className="inline-flex flex-wrap gap-1 rounded-xl border border-mist bg-cream/60 p-1" role="radiogroup" aria-label="Roteiro de">
+      {PLANNED_ORDER.map((f) => {
+        const Icon = FORMATS[f].icon;
+        const on = value === f;
+        return (
+          <button
+            key={f}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(on ? null : f)}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${on ? "bg-ink text-paper" : "text-graphite hover:bg-paper"}`}
+          >
+            <Icon size={13} strokeWidth={1.8} /> {PLANNED[f]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const SETTABLE: Status[] =["em_producao", "aguardando_aprovacao", "aprovado", "publicado"];
 
 /** Escolha manual do status (ex.: subir um conteúdo que já foi aprovado ou postado). */
 function StatusSelect({ block, onChange }: { block: Block; onChange: (s: Status) => void }) {
@@ -370,6 +486,15 @@ function Actions({ block, mode, onSuggest }: { block: Block; mode: ModalMode; on
           <Button variant="primary" onClick={() => store.setStatus(block.id, "aguardando_aprovacao")}>
             <Send size={14} /> Enviar para aprovação
           </Button>
+        )}
+        {block.status === "aprovado" && block.format === "roteiro" && (
+          block.plannedFormat ? (
+            <Button variant="primary" onClick={() => store.advanceScript(block.id)}>
+              Avançar para {PLANNED[block.plannedFormat]} <ArrowRight size={14} />
+            </Button>
+          ) : (
+            <Note>Roteiro aprovado. Escolha acima se ele é de vídeo, carrossel ou foto para avançar.</Note>
+          )
         )}
         {block.status === "aprovado" && block.format !== "roteiro" && (
           <Button variant="primary" onClick={() => store.setStatus(block.id, "publicado")}>
@@ -505,23 +630,36 @@ function Comments({ block }: { block: Block; mode: ModalMode }) {
   );
 }
 
-function HistoryFooter({ history, onDelete }: { history: HistoryEntry[]; onDelete?: () => void }) {
+function HistoryFooter({ history, onDelete, onRestore, onUndo }: {
+  history: HistoryEntry[]; onDelete?: () => void;
+  /** Volta o bloco para a versão anterior a esta entrada. */
+  onRestore?: (historyId: string) => void;
+  /** Desfaz a última alteração (Ctrl+Z). */
+  onUndo?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [peek, setPeek] = useState<string | null>(null);
   const versions = history.filter((h) => h.before).length + 1;
   const list = [...history].reverse();
   return (
     <div className="border-t border-mist bg-cream/60">
-      <div className="flex items-center justify-between px-4 md:px-6">
+      <div className="flex items-center justify-between gap-2 px-4 md:px-6">
         <button onClick={() => setOpen(!open)} className="flex items-center gap-2 py-2.5 text-xs font-medium text-graphite hover:text-ink" aria-expanded={open}>
           <History size={14} /> Histórico · {versions} {versions === 1 ? "versão" : "versões"}
           <ChevronDown size={13} className={`transition ${open ? "rotate-180" : ""}`} />
         </button>
-        {onDelete && (
-          <button onClick={onDelete} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted hover:bg-[#f6e3dc] hover:text-[#b9583a]">
-            <Trash2 size={13} /> Excluir
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onUndo && (
+            <button onClick={onUndo} title="Desfazer a última alteração (Ctrl+Z)" className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-graphite hover:bg-paper hover:text-ink">
+              <Undo2 size={13} /> Desfazer
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted hover:bg-[#f6e3dc] hover:text-[#b9583a]">
+              <Trash2 size={13} /> Excluir
+            </button>
+          )}
+        </div>
       </div>
       {open && (
         <ol className="thin-scroll max-h-56 overflow-y-auto px-4 pb-4 md:px-6">
@@ -541,6 +679,14 @@ function HistoryFooter({ history, onDelete }: { history: HistoryEntry[]; onDelet
                   <p className="mb-1"><span className="font-semibold">Formato:</span> {FORMATS[h.before.format].label} · <span className="font-semibold">Título:</span> {h.before.title}</p>
                   {h.before.script && <p className="line-clamp-4 whitespace-pre-wrap"><span className="font-semibold">Roteiro:</span> {h.before.script}</p>}
                   {h.before.caption && <p className="mt-1 line-clamp-3 whitespace-pre-wrap"><span className="font-semibold">Legenda:</span> {h.before.caption}</p>}
+                  {onRestore && (
+                    <button
+                      onClick={() => { if (confirm("Voltar o bloco para esta versão? A versão atual continua guardada no histórico.")) { onRestore(h.id); setPeek(null); } }}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-sand px-2.5 py-1 text-[11px] font-medium text-graphite hover:bg-cream"
+                    >
+                      <RotateCcw size={12} /> Restaurar esta versão
+                    </button>
+                  )}
                 </div>
               )}
             </li>

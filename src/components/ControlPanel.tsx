@@ -221,6 +221,17 @@ export default function ControlPage() {
           {/* Lateral */}
           <aside className="flex flex-col gap-8">
             <section>
+              <SectionTitle>Posts do mês x contrato</SectionTitle>
+              <div className="flex flex-col gap-4 rounded-2xl border border-mist bg-paper p-4">
+                <p className="-mb-1 text-xs text-muted">{MONTHS[ym.m]} de {ym.y}</p>
+                {active.map((c) => (
+                  <ProgressBar key={c.id} client={c} blocks={store.blocks} year={ym.y} month={ym.m} />
+                ))}
+                <div className="border-t border-mist pt-3"><ProgressLegend /></div>
+              </div>
+            </section>
+
+            <section>
               <SectionTitle right={attention.length > 0 && <span className="rounded-full bg-[#b9583a] px-2 text-[11px] font-semibold leading-[18px] text-paper">{attention.length}</span>}>
                 Precisa da sua atenção
               </SectionTitle>
@@ -249,17 +260,6 @@ export default function ControlPage() {
                     })}
                   </ul>
                 )}
-              </div>
-            </section>
-
-            <section>
-              <SectionTitle>Posts do mês x contrato</SectionTitle>
-              <div className="flex flex-col gap-4 rounded-2xl border border-mist bg-paper p-4">
-                <p className="-mb-1 text-xs text-muted">{MONTHS[ym.m]} de {ym.y}</p>
-                {active.map((c) => (
-                  <ProgressBar key={c.id} client={c} blocks={store.blocks} year={ym.y} month={ym.m} />
-                ))}
-                <div className="border-t border-mist pt-3"><ProgressLegend /></div>
               </div>
             </section>
           </aside>

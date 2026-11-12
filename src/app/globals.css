@@ -41,9 +41,16 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+/* Pulso lento da seta de "próximo conteúdo" depois que a cliente responde */
+/* (o Tailwind 4 posiciona com a propriedade "translate", então aqui só mexemos em "scale") */
+@keyframes nudge {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(28, 28, 28, 0.35); scale: 1; }
+  50% { box-shadow: 0 0 0 12px rgba(28, 28, 28, 0); scale: 1.08; }
+}
 .animate-pop { animation: pop-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .animate-fade { animation: fade-in 0.18s ease-out; }
+.animate-nudge { animation: nudge 2.2s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-pop, .animate-fade { animation: none; }
+  .animate-pop, .animate-fade, .animate-nudge { animation: none; }
 }

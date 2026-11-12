@@ -46,7 +46,7 @@ type Row = Record<string, any>;
 const CLIENT_COLS =
   "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, instagram_url, tiktok_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at)";
 const BLOCK_COLS =
-  "id, client_id, date, title, format, status, caption, script, suggestion, block_media(id, kind, path, position), block_history(id, at, author, action, before), block_comments(id, at, author, text, seen)";
+  "id, client_id, date, title, format, planned_format, status, caption, script, suggestion, block_media(id, kind, path, position), block_history(id, at, author, action, before), block_comments(id, at, author, text, seen)";
 
 async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
   const avatars = await signMany("midia", rows.map((r) => r.avatar_path).filter(Boolean));
@@ -79,6 +79,7 @@ async function mapBlocks(rows: Row[]): Promise<Block[]> {
     date: r.date,
     title: r.title,
     format: r.format,
+    plannedFormat: r.planned_format ?? undefined,
     status: r.status,
     caption: r.caption,
     script: r.script,

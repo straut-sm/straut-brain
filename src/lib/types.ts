@@ -1,5 +1,8 @@
 export type Format = "roteiro" | "reels" | "carrossel" | "foto";
 
+/** Formato final de um post (o que um roteiro vira ao avançar). */
+export type PostFormat = Exclude<Format, "roteiro">;
+
 export type Status =
   | "em_producao"
   | "aguardando_aprovacao"
@@ -37,7 +40,7 @@ export interface Client {
   tiktokUrl: string;
   /** Página ativa. Desativada = contrato cancelado: o link deixa de funcionar. */
   active: boolean;
-  /** Observações internas — vazio na visão da cliente. */
+  /** Posicionamento da cliente (contexto para a IA) — vazio na visão da cliente. */
   notes: string;
   /** Link temporário da foto de perfil. */
   avatarUrl?: string;
@@ -50,6 +53,8 @@ export interface Snapshot {
   caption: string;
   script: string;
   date: string;
+  /** Formato planejado do roteiro (versões salvas antes desta função não têm). */
+  plannedFormat?: PostFormat | null;
 }
 
 export interface HistoryEntry {
@@ -91,6 +96,8 @@ export interface Block {
   date: string; // YYYY-MM-DD
   title: string;
   format: Format;
+  /** Roteiro: formato que ele vai virar (vídeo/reels, carrossel ou foto). */
+  plannedFormat?: PostFormat;
   status: Status;
   caption: string;
   script: string;

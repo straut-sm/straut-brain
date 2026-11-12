@@ -6,7 +6,7 @@ import * as A from "@/app/actions";
 import type { Result } from "@/app/actions";
 import { hueOf } from "./meta";
 import { browserClient } from "./supabase/browser";
-import type { Block, Client, ClientInput, FileKind, Format, MediaKind, Role, Status } from "./types";
+import type { Block, Client, ClientInput, FileKind, Format, MediaKind, PostFormat, Role, Status } from "./types";
 
 interface Data {
   clients: Client[];
@@ -24,6 +24,9 @@ interface Store extends Data {
   createBlock: (clientId: string, date: string) => Promise<string | null>;
   updateBlock: (id: string, patch: Partial<Pick<Block, "title" | "caption" | "script" | "date">>) => Promise<void>;
   changeFormat: (id: string, format: Format) => Promise<void>;
+  setPlannedFormat: (id: string, planned: PostFormat | null) => Promise<void>;
+  advanceScript: (id: string) => Promise<void>;
+  restoreVersion: (id: string, historyId: string) => Promise<void>;
   setStatus: (id: string, status: Status) => Promise<void>;
   approve: (id: string) => Promise<void>;
   suggest: (id: string, field: "caption" | "script", proposed: string) => Promise<void>;
@@ -188,6 +191,25 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       id,
       (b) => ({ ...b, format, status: format === "roteiro" && b.status === "publicado" ? "aprovado" : b.status }),
       () => A.changeFormat(id, format),
+    ),
+    setPlannedFormat: (id, planned) => blockOp(id, (b) => ({ ...b, plannedFormat: planned ?? undefined }), () => A.setPlannedFormat(id, planned)),
+    advanceScript: (id) => blockOp(
+      id,
+      (b) => (b.plannedFormat ? { ...b, format: b.plannedFormat, status: "em_producao", suggestion: undefined } : b),
+      () => A.advanceScript(id),
+    ),
+    restoreVersion: (id, historyId) => blockOp(
+      id,
+      (b) => {
+        const v = b.history.find((h) => h.id === historyId)?.before;
+        if (!v) return b;
+        return {
+          ...b, format: v.format, title: v.title, caption: v.caption, script: v.script, date: v.date,
+          plannedFormat: v.plannedFormat === undefined ? b.plannedFormat : (v.plannedFormat ?? undefined),
+          status: v.format === "roteiro" && b.status === "publicado" ? "aprovado" : b.status,
+        };
+      },
+      () => A.restoreVersion(id, historyId),
     ),
     setStatus: (id, status) => blockOp(id, (b) => ({ ...b, status, suggestion: undefined }), () => A.setStatus(id, status)),
     approve: (id) => blockOp(id, (b) => ({ ...b, status: "aprovado" }), () => A.approve(id)),

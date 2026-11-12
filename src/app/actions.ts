@@ -7,9 +7,9 @@ import { redirect } from "next/navigation";
 import { AccessError, clientCookieName, makeClientToken, requireAdmin, requireClientAccess } from "@/lib/auth";
 import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
-import { FORMATS } from "@/lib/meta";
+import { FORMATS, PLANNED } from "@/lib/meta";
 import { loadBlock } from "@/lib/data";
-import type { Block, ClientInput, FileKind, Format, MediaKind, Snapshot, Status } from "@/lib/types";
+import type { Block, ClientInput, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -27,14 +27,18 @@ async function run<T>(fn: () => Promise<T>): Promise<Result<T>> {
 async function getBlock(id: string) {
   const { data, error } = await db()
     .from("blocks")
-    .select("id, client_id, date, title, format, status, caption, script, suggestion")
+    .select("id, client_id, date, title, format, planned_format, status, caption, script, suggestion")
     .eq("id", id)
     .single();
   if (error || !data) throw new AccessError("Conteúdo não encontrado.");
   return data as any;
 }
 
-const snap = (b: any): Snapshot => ({ format: b.format, title: b.title, caption: b.caption, script: b.script, date: b.date });
+const snap = (b: any): Snapshot => ({
+  format: b.format, title: b.title, caption: b.caption, script: b.script, date: b.date, plannedFormat: b.planned_format ?? null,
+});
+
+const POST_FORMATS: PostFormat[] = ["reels", "carrossel", "foto"];
 
 async function log(blockId: string, author: "Straut" | "Cliente", action: string, before?: Snapshot) {
   const { error } = await db().from("block_history").insert({ block_id: blockId, author, action, before: before ?? null });
@@ -130,6 +134,56 @@ export async function changeFormat(id: string, format: Format): BlockResult {
         log(id, "Straut", `Formato alterado de ${FORMATS[b.format as Format].label} para ${FORMATS[format].label}`, snap(b)),
       ]);
     }
+    return loadBlock(id);
+  });
+}
+
+/** Roteiro: escolhe o formato que ele vai virar (null = ainda não definido). */
+export async function setPlannedFormat(id: string, planned: PostFormat | null): BlockResult {
+  return run(async () => {
+    if (planned !== null && !POST_FORMATS.includes(planned)) throw new AccessError("Formato inválido.");
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    if ((b.planned_format ?? null) !== planned) {
+      await Promise.all([
+        update("blocks", id, { planned_format: planned }),
+        log(id, "Straut", planned ? `Roteiro definido como ${PLANNED[planned]}` : "Formato planejado removido"),
+      ]);
+    }
+    return loadBlock(id);
+  });
+}
+
+/** Roteiro aprovado vira o post do formato planejado, que entra em produção. */
+export async function advanceScript(id: string): BlockResult {
+  return run(async () => {
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    if (b.format !== "roteiro") throw new AccessError("Este bloco já não é um roteiro.");
+    const target = b.planned_format as PostFormat | null;
+    if (!target) throw new AccessError("Escolha antes se o roteiro é de vídeo, carrossel ou foto.");
+    await Promise.all([
+      update("blocks", id, { format: target, status: "em_producao", suggestion: null }),
+      log(id, "Straut", `Roteiro avançado para ${FORMATS[target].label}`, snap(b)),
+    ]);
+    return loadBlock(id);
+  });
+}
+
+/** Volta o bloco para a versão guardada numa entrada do histórico (como um "desfazer"). */
+export async function restoreVersion(id: string, historyId: string): BlockResult {
+  return run(async () => {
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    const { data: h } = await db().from("block_history").select("action, before").eq("id", historyId).eq("block_id", id).maybeSingle();
+    const v = h?.before as Snapshot | null | undefined;
+    if (!h || !v) throw new AccessError("Versão não encontrada.");
+    const format = v.format in FORMATS ? v.format : b.format;
+    const patch: Record<string, unknown> = { format, title: v.title, caption: v.caption, script: v.script, date: v.date };
+    if (v.plannedFormat !== undefined) patch.planned_format = v.plannedFormat;
+    // Roteiro não tem "Publicado"
+    if (format === "roteiro" && b.status === "publicado") patch.status = "aprovado";
+    await Promise.all([
+      update("blocks", id, patch),
+      log(id, "Straut", `Restaurou a versão anterior a "${h.action}"`, snap(b)),
+    ]);
     return loadBlock(id);
   });
 }

@@ -12,6 +12,21 @@ export const CLIENT_COLORS = [
   "#8c6a52", "#5e8a86", "#a0655f", "#7a7397", "#6b6b6b",
 ];
 
+const POSITIONING_TEMPLATE = `Procedimentos:
+-
+
+Tom de voz:
+-
+
+Público:
+-
+
+Design:
+-
+
+Evitar:
+- `;
+
 const EMPTY: ClientInput = {
   name: "", specialty: "", contractPosts: 12, paymentDay: 10, color: CLIENT_COLORS[0],
   driveUrl: "", instagramUrl: "", tiktokUrl: "", password: "", active: true, notes: "",
@@ -187,8 +202,20 @@ export default function ClientForm({ client, onClose }: {
                 ))}
               </div>
             </Field>
-            <Field label="Observações internas" className="sm:col-span-2">
-              <textarea rows={3} className={`${input} resize-y`} value={v.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Preferências, tom de voz, contatos… (não aparece para a cliente)" />
+            <Field label="Posicionamento da cliente" className="sm:col-span-2">
+              <p className="mb-2 text-[11px] leading-relaxed text-muted">
+                Contexto que a IA lê sempre que for produzir para esta cliente. Não aparece para a cliente.
+                {!v.notes.trim() && (
+                  <> <button type="button" onClick={() => set("notes", POSITIONING_TEMPLATE)} className="font-medium text-graphite underline underline-offset-2 hover:text-ink">Usar modelo</button></>
+                )}
+              </p>
+              <textarea
+                rows={9}
+                className={`${input} resize-y leading-relaxed`}
+                value={v.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder={"Procedimentos: …\nTom de voz: …\nPúblico: …\nDesign: …"}
+              />
             </Field>
           </div>
 
