@@ -14,6 +14,8 @@ export type CalendarProps = {
   onMonthChange: (year: number, month: number) => void;
   onOpen: (id: string) => void;
   onAdd?: (date: string) => void;
+  /** Quando existe, os blocos podem ser arrastados para outro dia (só no desktop). */
+  onMove?: (id: string, date: string) => void;
   clientsById?: (id: string) => Client | undefined;
   /** Destaca só o que está aguardando aprovação (os demais ficam esmaecidos). */
   focusPending?: boolean;
@@ -70,7 +72,10 @@ export default function Calendar(props: CalendarProps) {
   );
 }
 
-function Chip({ block, client, dim, onOpen, showNews }: { block: Block; client?: Client; dim: boolean; onOpen: () => void; showNews?: boolean }) {
+function Chip({ block, client, dim, onOpen, showNews, draggable = false, dragging = false, onDragStart, onDragEnd }: {
+  block: Block; client?: Client; dim: boolean; onOpen: () => void; showNews?: boolean;
+  draggable?: boolean; dragging?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
+}) {
   const F = FORMATS[block.format];
   const Icon = F.icon;
   const accent = client ? client.color : STATUSES[block.status].color;
@@ -78,7 +83,15 @@ function Chip({ block, client, dim, onOpen, showNews }: { block: Block; client?:
   return (
     <button
       onClick={onOpen}
-      className={`group/chip relative w-full rounded-lg border border-mist bg-paper py-1.5 pl-2.5 pr-2 text-left transition hover:-translate-y-px hover:border-sand hover:shadow-[0_2px_10px_-4px_rgba(28,28,28,0.18)] ${dim ? "opacity-30 hover:opacity-100" : ""}`}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => {
+        e.dataTransfer.setData("text/plain", block.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      } : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
+      title={draggable ? "Arraste para outro dia para mudar a data" : undefined}
+      className={`group/chip relative w-full rounded-lg border border-mist bg-paper py-1.5 pl-2.5 pr-2 text-left transition hover:-translate-y-px hover:border-sand hover:shadow-[0_2px_10px_-4px_rgba(28,28,28,0.18)] ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${dragging ? "opacity-40" : dim ? "opacity-30 hover:opacity-100" : ""}`}
     >
       <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-r" style={{ background: accent }} />
       {client && (
@@ -100,10 +113,14 @@ function Chip({ block, client, dim, onOpen, showNews }: { block: Block; client?:
 }
 
 function DesktopGrid({
-  year, month, monthBlocks, onOpen, onAdd, clientsById, focusPending, showNews,
+  year, month, monthBlocks, onOpen, onAdd, onMove, clientsById, focusPending, showNews,
 }: CalendarProps & { monthBlocks: Block[] }) {
   const weeks = monthWeeks(year, month);
   const today = todayYmd();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const dragFrom = dragId ? monthBlocks.find((b) => b.id === dragId)?.date : undefined;
+  const endDrag = () => { setDragId(null); setOver(null); };
   const byDay = useMemo(() => {
     const m = new Map<string, Block[]>();
     monthBlocks.forEach((b) => m.set(b.date, [...(m.get(b.date) ?? []), b]));
@@ -125,7 +142,24 @@ function DesktopGrid({
             const items = byDay.get(date) ?? [];
             const isToday = date === today;
             return (
-              <div key={di} className="group/day relative min-h-[112px] border-r border-mist p-1.5 last:border-r-0">
+              <div
+                key={di}
+                onDragOver={onMove && dragId ? (e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (over !== date) setOver(date);
+                } : undefined}
+                onDragLeave={onMove && dragId ? (e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === date ? null : o));
+                } : undefined}
+                onDrop={onMove && dragId ? (e) => {
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData("text/plain") || dragId;
+                  if (id && date !== dragFrom) onMove(id, date);
+                  endDrag();
+                } : undefined}
+                className={`group/day relative min-h-[112px] border-r border-mist p-1.5 transition-colors last:border-r-0 ${over === date && date !== dragFrom ? "bg-cream ring-2 ring-inset ring-sand" : ""}`}
+              >
                 <div className="mb-1 flex items-center justify-between px-0.5">
                   <span
                     className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs ${isToday ? "bg-ink font-semibold text-paper" : "text-graphite"}`}
@@ -151,6 +185,10 @@ function DesktopGrid({
                       dim={!!focusPending && !isPending(b)}
                       showNews={showNews}
                       onOpen={() => onOpen(b.id)}
+                      draggable={!!onMove}
+                      dragging={dragId === b.id}
+                      onDragStart={() => setDragId(b.id)}
+                      onDragEnd={endDrag}
                     />
                   ))}
                 </div>

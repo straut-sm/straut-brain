@@ -269,6 +269,7 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
             onMonthChange={(y, m) => setYm({ y, m })}
             onOpen={setOpen}
             onAdd={isClient ? undefined : addBlock}
+            onMove={isClient ? undefined : (id, date) => store.updateBlock(id, { date })}
             focusPending={focusPending}
             showNews={!isClient}
             headerExtra={
@@ -281,7 +282,7 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <StatusLegend />
             {!isClient && (
-              <span className="hidden items-center gap-1 text-[11px] text-muted md:inline-flex"><Plus size={12} /> Passe o mouse em um dia para criar um conteúdo</span>
+              <span className="hidden items-center gap-1 text-[11px] text-muted md:inline-flex"><Plus size={12} /> Passe o mouse em um dia para criar um conteúdo · arraste um bloco para mudar a data</span>
             )}
           </div>
         </section>

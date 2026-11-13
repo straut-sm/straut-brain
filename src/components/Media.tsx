@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Loader2, Trash2, Upload, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, Trash2, Upload, X, ZoomIn } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Block, MediaItem, MediaKind } from "@/lib/types";
@@ -40,6 +40,38 @@ function RemoveButton({ item, label }: { item: MediaItem; label: string }) {
   );
 }
 
+/** Nome do arquivo baixado: título do bloco + o que é + extensão original. */
+function fileName(block: Block, what: string, url: string): string {
+  const ext = (new URL(url, "http://x").pathname.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? "").toLowerCase();
+  const base = block.title
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")
+    .toLowerCase().slice(0, 60) || "conteudo";
+  return `${base}-${what}${ext ? `.${ext}` : ""}`;
+}
+
+/** O link assinado do Supabase aceita ?download= e devolve o arquivo como anexo, com esse nome. */
+function downloadUrl(url: string, name: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(name)}`;
+}
+
+function DownloadButton({ block, item, what, label, className = "" }: {
+  block: Block; item: MediaItem; what: string; label: string; className?: string;
+}) {
+  return (
+    <a
+      href={downloadUrl(item.url, fileName(block, what, item.url))}
+      download
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`Baixar ${label}`}
+      title={`Baixar ${label}`}
+      className={`inline-flex items-center justify-center rounded-full bg-paper/90 p-1.5 text-graphite shadow hover:bg-paper hover:text-ink ${className}`}
+    >
+      <Download size={13} />
+    </a>
+  );
+}
+
 function Empty({ block, ratio, text }: { block: Block; ratio: string; text: string }) {
   return (
     <div className="relative">
@@ -49,7 +81,9 @@ function Empty({ block, ratio, text }: { block: Block; ratio: string; text: stri
   );
 }
 
-function Lightbox({ images, index, onClose, onIndex }: { images: MediaItem[]; index: number; onClose: () => void; onIndex: (i: number) => void }) {
+function Lightbox({ block, what, images, index, onClose, onIndex }: {
+  block: Block; what: (i: number) => string; images: MediaItem[]; index: number; onClose: () => void; onIndex: (i: number) => void;
+}) {
   const total = images.length;
   const prev = useCallback(() => onIndex((index - 1 + total) % total), [index, total, onIndex]);
   const next = useCallback(() => onIndex((index + 1) % total), [index, total, onIndex]);
@@ -65,9 +99,21 @@ function Lightbox({ images, index, onClose, onIndex }: { images: MediaItem[]; in
 
   return (
     <div className="animate-fade fixed inset-0 z-[60] flex items-center justify-center bg-ink/90 p-4" onClick={onClose}>
-      <button aria-label="Fechar" className="absolute right-4 top-4 rounded-full bg-paper/10 p-2 text-paper hover:bg-paper/20" onClick={onClose}>
-        <X size={20} />
-      </button>
+      <div className="absolute right-4 top-4 flex gap-2">
+        <a
+          href={downloadUrl(images[index].url, fileName(block, what(index), images[index].url))}
+          download
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Baixar imagem"
+          title="Baixar imagem"
+          className="rounded-full bg-paper/10 p-2 text-paper hover:bg-paper/20"
+        >
+          <Download size={20} />
+        </a>
+        <button aria-label="Fechar" className="rounded-full bg-paper/10 p-2 text-paper hover:bg-paper/20" onClick={onClose}>
+          <X size={20} />
+        </button>
+      </div>
       {total > 1 && (
         <>
           <button aria-label="Anterior" onClick={(e) => { e.stopPropagation(); prev(); }} className="absolute left-3 rounded-full bg-paper/10 p-2.5 text-paper hover:bg-paper/20 md:left-8">
@@ -111,7 +157,12 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
             ) : (
               <Empty block={block} ratio="aspect-[9/16]" text={canUpload ? "Envie o vídeo final" : "Vídeo em produção"} />
             )}
-            {canUpload && video && <div className="absolute right-2 top-2"><RemoveButton item={video} label="o vídeo" /></div>}
+            {video && (
+              <div className="absolute right-2 top-2 flex gap-1.5">
+                <DownloadButton block={block} item={video} what="video" label="o vídeo" />
+                {canUpload && <RemoveButton item={video} label="o vídeo" />}
+              </div>
+            )}
           </div>
           <div className="w-[84px] shrink-0">
             <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Capa</p>
@@ -124,6 +175,7 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
                 <PostArt hue={(block.hue + 40) % 360} title="" compact className="aspect-[9/16] w-full rounded-lg ring-1 ring-mist" />
               )}
               {canUpload && cover && <div className="absolute -right-2 -top-2"><RemoveButton item={cover} label="a capa" /></div>}
+              {cover && <div className="absolute -bottom-2 -right-2"><DownloadButton block={block} item={cover} what="capa" label="a capa" /></div>}
             </div>
           </div>
         </div>
@@ -133,7 +185,7 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
             <UploadButton blockId={block.id} kind="cover" label={cover ? "Trocar capa" : "Enviar capa"} />
           </div>
         )}
-        {zoom !== null && cover && <Lightbox images={[cover]} index={0} onIndex={() => {}} onClose={() => setZoom(null)} />}
+        {zoom !== null && cover && <Lightbox block={block} what={() => "capa"} images={[cover]} index={0} onIndex={() => {}} onClose={() => setZoom(null)} />}
       </div>
     );
   }
@@ -164,6 +216,7 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
               </>
             )}
             <span className="absolute bottom-3 left-3 rounded-full bg-paper/85 px-2 py-0.5 text-[11px] font-medium text-ink">{current + 1}/{total}</span>
+            <DownloadButton block={block} item={images[current]} what={`slide-${current + 1}`} label={`o slide ${current + 1}`} className="absolute bottom-3 right-3" />
           </div>
         )}
         {total > 0 && (
@@ -174,12 +227,13 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
                   <img src={m.url} alt="" className="aspect-[4/5] w-full object-cover" />
                 </button>
                 {canUpload && <div className="absolute -right-1.5 -top-1.5 hidden group-hover:block"><RemoveButton item={m} label={`o slide ${i + 1}`} /></div>}
+                <DownloadButton block={block} item={m} what={`slide-${i + 1}`} label={`o slide ${i + 1}`} className="absolute -bottom-1.5 -right-1.5 !p-1" />
               </div>
             ))}
           </div>
         )}
         {canUpload && <div><UploadButton blockId={block.id} kind="image" label={total ? "Adicionar imagens" : "Enviar imagens"} multiple /></div>}
-        {zoom !== null && total > 0 && <Lightbox images={images} index={zoom} onIndex={(i) => { setZoom(i); setSlide(i); }} onClose={() => setZoom(null)} />}
+        {zoom !== null && total > 0 && <Lightbox block={block} what={(i) => `slide-${i + 1}`} images={images} index={zoom} onIndex={(i) => { setZoom(i); setSlide(i); }} onClose={() => setZoom(null)} />}
       </div>
     );
   }
@@ -196,6 +250,7 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
               <ZoomIn size={15} />
             </span>
           </button>
+          <DownloadButton block={block} item={photo} what="foto" label="a foto" className="absolute bottom-3 right-3" />
         </div>
       ) : (
         <Empty block={block} ratio="aspect-[4/5]" text={canUpload ? "Envie a foto" : "Foto em produção"} />
@@ -206,7 +261,7 @@ export default function Media({ block, canUpload }: { block: Block; canUpload: b
           {photo && <RemoveButton item={photo} label="a foto" />}
         </div>
       )}
-      {zoom !== null && photo && <Lightbox images={[photo]} index={0} onIndex={() => {}} onClose={() => setZoom(null)} />}
+      {zoom !== null && photo && <Lightbox block={block} what={() => "foto"} images={[photo]} index={0} onIndex={() => {}} onClose={() => setZoom(null)} />}
     </div>
   );
 }
