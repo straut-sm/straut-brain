@@ -551,9 +551,9 @@ function TextSection({
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="text-[11px] font-medium uppercase tracking-wider text-muted">{label}</p>
-        {name === "script" && !editable && block.script && (
+        {!editable && block[name] && (
           <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-lg border border-sand px-2.5 py-1 text-xs font-medium text-graphite hover:bg-cream">
-            {copied ? <><Check size={13} /> Copiado</> : <><Copy size={13} /> Copiar roteiro</>}
+            {copied ? <><Check size={13} /> Copiado</> : <><Copy size={13} /> {name === "script" ? "Copiar roteiro" : "Copiar legenda"}</>}
           </button>
         )}
       </div>
