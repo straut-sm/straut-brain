@@ -174,12 +174,12 @@ export default function BlockModal({
 
       {mode !== "visualizacao" && !editing && <Comments block={block} mode={mode} />}
 
-      {mode === "visualizacao" && client && (
+      {(mode === "visualizacao" || (mode === "straut" && showClient)) && client && !editing && (
         <Link
           href={`/c/${client.slug}?bloco=${block.id}`}
           className="inline-flex items-center gap-1.5 self-start text-sm font-medium text-graphite underline-offset-4 hover:text-ink hover:underline"
         >
-          Editar na página da cliente <ExternalLink size={14} />
+          {mode === "straut" ? "Abrir na página da cliente" : "Editar na página da cliente"} <ExternalLink size={14} />
         </Link>
       )}
     </div>

@@ -178,6 +178,7 @@ export default function ControlPage() {
               month={ym.m}
               onMonthChange={(y, m) => setYm({ y, m })}
               onOpen={setOpen}
+              onMove={(id, date) => store.updateBlock(id, { date })}
               clientsById={store.clientById}
               showNews
               headerExtra={
@@ -222,7 +223,10 @@ export default function ControlPage() {
                 </div>
               }
             />
-            <div className="mt-3"><StatusLegend /></div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <StatusLegend />
+              <span className="hidden text-[11px] text-muted md:inline">Arraste um bloco para mudar a data</span>
+            </div>
           </section>
 
           {/* Lateral */}
@@ -273,7 +277,7 @@ export default function ControlPage() {
         </div>
       </main>
 
-      {open && <BlockModal blockId={open} mode="visualizacao" showClient onClose={() => setOpen(null)} />}
+      {open && <BlockModal key={open} blockId={open} mode="straut" showClient onClose={() => setOpen(null)} />}
       {form === "new" && <ClientForm onClose={() => setForm(null)} />}
       {editing && <ClientForm key={editing.id} client={editing} onClose={() => setForm(null)} />}
     </div>
