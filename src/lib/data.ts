@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "./supabase/admin";
 import { hueOf } from "./meta";
+import { driveIdOf, drivePreviewUrl, isDrivePath } from "./drive";
 import type { Block, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
 }
 
 async function mapBlocks(rows: Row[]): Promise<Block[]> {
-  const paths = rows.flatMap((r) => ((r.block_media ?? []) as Row[]).map((m) => m.path));
+  const paths = rows.flatMap((r) => ((r.block_media ?? []) as Row[]).map((m) => m.path)).filter((p) => !isDrivePath(p));
   const urls = await signMany("midia", paths);
   return rows.map((r) => ({
     id: r.id,
@@ -87,7 +88,9 @@ async function mapBlocks(rows: Row[]): Promise<Block[]> {
     hue: hueOf(r.id),
     media: ((r.block_media ?? []) as Row[])
       .sort((a, b) => a.position - b.position)
-      .map((m): MediaItem => ({ id: m.id, kind: m.kind, url: urls.get(m.path) ?? "" })),
+      .map((m): MediaItem => isDrivePath(m.path)
+        ? { id: m.id, kind: m.kind, url: drivePreviewUrl(driveIdOf(m.path)), driveId: driveIdOf(m.path) }
+        : { id: m.id, kind: m.kind, url: urls.get(m.path) ?? "" }),
     history: ((r.block_history ?? []) as Row[])
       .sort((a, b) => (a.at < b.at ? -1 : 1))
       .map((h): HistoryEntry => ({ id: h.id, at: h.at, by: h.author, action: h.action, before: (h.before as Snapshot | null) ?? undefined })),

@@ -88,6 +88,8 @@ export interface MediaItem {
   id: string;
   kind: MediaKind;
   url: string;
+  /** Vídeo que fica no Google Drive (id do arquivo); nesse caso `url` é o player do Drive. */
+  driveId?: string;
 }
 
 export interface Block {

@@ -9,6 +9,13 @@ import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
 import { FORMATS, PLANNED } from "@/lib/meta";
 import { loadBlock } from "@/lib/data";
+import { driveFileId, drivePath, isDrivePath } from "@/lib/drive";
+
+/** Apaga do armazenamento só os arquivos enviados (links do Drive não ocupam espaço aqui). */
+async function removeStored(paths: string[]) {
+  const stored = paths.filter((p) => !isDrivePath(p));
+  if (stored.length) await db().storage.from("midia").remove(stored);
+}
 import type { Block, ClientInput, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
@@ -300,7 +307,7 @@ export async function deleteBlock(id: string): Promise<Result> {
     const { data: media } = await db().from("block_media").select("path").eq("block_id", id);
     const { error } = await db().from("blocks").delete().eq("id", id);
     if (error) throw error;
-    if (media?.length) await db().storage.from("midia").remove(media.map((m) => m.path));
+    if (media?.length) await removeStored(media.map((m) => m.path));
     return null;
   });
 }
@@ -421,7 +428,7 @@ export async function attachMedia(blockId: string, kind: MediaKind, paths: strin
       // Substitui o arquivo anterior
       const { data: old } = await db().from("block_media").select("id, path").eq("block_id", blockId).eq("kind", kind);
       if (old?.length) {
-        await db().storage.from("midia").remove(old.map((o) => o.path));
+        await removeStored(old.map((o) => o.path));
         await db().from("block_media").delete().in("id", old.map((o) => o.id));
       }
     }
@@ -441,10 +448,45 @@ export async function removeMedia(mediaId: string): BlockResult {
     await requireAdmin();
     const { data: m } = await db().from("block_media").select("id, path, block_id").eq("id", mediaId).single();
     if (!m) return null;
-    await db().storage.from("midia").remove([m.path]);
+    await removeStored([m.path]);
     await db().from("block_media").delete().eq("id", mediaId);
     await log(m.block_id, "Straut", "Removeu uma mídia");
     return loadBlock(m.block_id);
+  });
+}
+
+/** Vídeo pelo link do Google Drive: salva só o link, no lugar do vídeo anterior. */
+export async function attachDriveVideo(blockId: string, link: string): BlockResult {
+  return run(async () => {
+    await requireAdmin();
+    const id = driveFileId(link);
+    if (!id) throw new AccessError("Link do Google Drive inválido. Use o link de compartilhamento do arquivo.");
+    await getBlock(blockId);
+    const { data: old } = await db().from("block_media").select("id, path").eq("block_id", blockId).eq("kind", "video");
+    if (old?.length) {
+      await removeStored(old.map((o) => o.path));
+      await db().from("block_media").delete().in("id", old.map((o) => o.id));
+    }
+    const { error } = await db().from("block_media").insert({ block_id: blockId, kind: "video", path: drivePath(id), position: 0 });
+    if (error) throw error;
+    await log(blockId, "Straut", "Adicionou o vídeo pelo Google Drive");
+    return loadBlock(blockId);
+  });
+}
+
+/** Nova ordem das imagens do carrossel. */
+export async function reorderMedia(blockId: string, ids: string[]): BlockResult {
+  return run(async () => {
+    await requireAdmin();
+    const { data: cur } = await db().from("block_media").select("id").eq("block_id", blockId).eq("kind", "image");
+    const known = new Set((cur ?? []).map((m) => m.id));
+    if (ids.length !== known.size || !ids.every((id) => known.has(id))) throw new AccessError("As imagens mudaram. Atualize a página.");
+    for (const [i, id] of ids.entries()) {
+      const { error } = await db().from("block_media").update({ position: i }).eq("id", id).eq("block_id", blockId);
+      if (error) throw error;
+    }
+    await log(blockId, "Straut", "Mudou a ordem das imagens");
+    return loadBlock(blockId);
   });
 }
 

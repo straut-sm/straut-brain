@@ -132,8 +132,8 @@ export default function BlockModal({
 
   const info = (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
+        <div className="min-w-0">
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">
             {block.format === "roteiro" ? "Data prevista" : "Dia de postagem"}
           </p>
@@ -142,13 +142,14 @@ export default function BlockModal({
               type="date"
               value={draft.date}
               onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
-              className="w-full rounded-lg border border-sand bg-paper px-2 py-1.5 text-sm"
+              // No Safari do iPhone o campo de data ignora a largura e invade a coluna ao lado
+              className="block h-[34px] w-full min-w-0 max-w-full appearance-none rounded-lg border border-sand bg-paper px-2 py-1.5 text-left text-sm [&::-webkit-date-and-time-value]:text-left"
             />
           ) : (
             <p className="text-sm text-ink first-letter:uppercase">{formatLong(block.date)}</p>
           )}
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Status</p>
           {editing === "straut" ? (
             <StatusSelect block={block} onChange={(s) => store.setStatus(block.id, s)} />
@@ -239,7 +240,7 @@ export default function BlockModal({
               <Pencil size={14} /> Editar
             </Button>
           )}
-          {(onPrev || onNext) && (
+          {(onPrev || onNext) && !editing && (
             <div className="flex items-center md:hidden">
               <button aria-label="Conteúdo anterior" onClick={goPrev} disabled={!goPrev} className="rounded-lg p-2 text-graphite hover:bg-cream disabled:opacity-30">
                 <ChevronLeft size={20} />
@@ -284,13 +285,13 @@ export default function BlockModal({
 
         {/* Barra de edição */}
         {editing && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-mist bg-cream px-4 py-3 md:px-6">
+          <div className="flex flex-col gap-2 border-t border-mist bg-cream px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 md:px-6">
             <p className="text-xs text-graphite">
               {editing === "suggest"
                 ? "Edite o texto diretamente. A Straut revisa sua sugestão antes de aplicar."
                 : "As alterações ficam salvas no histórico do bloco."}
             </p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 [&>*]:flex-1 sm:[&>*]:flex-none">
               <Button variant="ghost" onClick={() => (pristine ? close() : setEditing(null))}>Cancelar</Button>
               <Button variant="primary" onClick={save}>
                 {editing === "suggest" ? <><Send size={14} /> Enviar sugestão</> : <><Check size={14} /> Salvar</>}
@@ -427,13 +428,13 @@ function StatusSelect({ block, onChange }: { block: Block; onChange: (s: Status)
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="Alterar status"
-        className="inline-flex items-center gap-1 rounded-full ring-1 ring-sand transition hover:ring-graphite/30"
+        className="inline-flex max-w-full items-center gap-1 rounded-full ring-1 ring-sand transition hover:ring-graphite/30"
       >
         <StatusPill status={block.status} format={block.format} />
         <ChevronDown size={12} className="mr-2 text-graphite" />
       </button>
       {open && (
-        <div role="listbox" className="animate-fade absolute left-0 top-full z-10 mt-1 w-56 rounded-xl border border-mist bg-paper p-1 shadow-xl">
+        <div role="listbox" className="animate-fade absolute right-0 top-full z-10 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-xl sm:left-0 sm:right-auto border border-mist bg-paper p-1 shadow-xl">
           <p className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-wider text-muted">Alterar status</p>
           {options.map((s) => (
             <button

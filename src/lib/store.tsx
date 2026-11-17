@@ -39,6 +39,8 @@ interface Store extends Data {
   setAvatar: (clientId: string, image: Blob | null) => Promise<void>;
   uploadMedia: (blockId: string, kind: MediaKind, files: File[]) => Promise<void>;
   removeMedia: (mediaId: string) => Promise<void>;
+  attachDriveVideo: (blockId: string, link: string) => Promise<void>;
+  reorderMedia: (blockId: string, ids: string[]) => Promise<void>;
   addFiles: (clientId: string, files: File[], kind: (f: File) => FileKind) => Promise<void>;
   removeFile: (fileId: string) => Promise<void>;
   downloadFile: (fileId: string) => Promise<void>;
@@ -276,6 +278,18 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       if (!owner) return;
       await blockOp(owner.id, (b) => ({ ...b, media: b.media.filter((m) => m.id !== mediaId) }), () => A.removeMedia(mediaId));
     },
+
+    attachDriveVideo: (blockId, link) => blockOp(blockId, null, () => A.attachDriveVideo(blockId, link)),
+
+    reorderMedia: (blockId, ids) => blockOp(
+      blockId,
+      (b) => {
+        const byId = new Map(b.media.map((m) => [m.id, m]));
+        const images = ids.map((id) => byId.get(id)).filter((m): m is NonNullable<typeof m> => !!m);
+        return { ...b, media: [...b.media.filter((m) => m.kind !== "image"), ...images] };
+      },
+      () => A.reorderMedia(blockId, ids),
+    ),
 
     addFiles: (clientId, files, kind) => uploading(async () => {
       for (const f of files) {
