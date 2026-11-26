@@ -88,11 +88,11 @@ dos 3 melhores posts do mês que ainda não têm motivo. A página principal mos
 
 ## Aba Tendências
 
-Página  (Straut: edita, libera, "Virar roteiro") e  (cliente: só lê o que foi
-liberado). Tabela : uma linha por item,  =  |  |  | ,
-agrupados por  (segunda-feira). A semana só aparece para a cliente com  preenchido (botão
-"Liberar para a cliente").  controla o aviso "nova" no botão da cliente. A rotina
- (segunda às 10h, no computador do Guilherme) pesquisa e grava a semana como rascunho.
+Página `/c/[slug]/tendencias` (Straut: edita, libera, "Virar roteiro") e `/p/[slug]/tendencias` (cliente: só lê o
+que foi liberado). Tabela `trend_items`: uma linha por item, `kind` = `mercado` | `referencia` | `gravar` | `stories`,
+agrupados por `week_of` (segunda-feira). A semana só aparece para a cliente com `published_at` preenchido (botão
+"Liberar para a cliente"). `clients.trends_seen_at` controla o aviso "nova" no botão da cliente. A rotina
+`painel-tendencias-semana` (segunda às 10h, no computador do Guilherme) pesquisa e grava a semana como rascunho.
 Apagar manda para a Lixeira.
 
 ## Como rodar
