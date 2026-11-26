@@ -3,7 +3,7 @@ import { db } from "./supabase/admin";
 import { hueOf } from "./meta";
 import { driveIdOf, drivePreviewUrl, isDrivePath } from "./drive";
 import { purgeSoon } from "./trash";
-import type { Block, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
+import type { Block, CalendarEvent, ProductionItem, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
 // Links assinados (mídias privadas). Guardados em memória por ~50 min para
@@ -112,17 +112,25 @@ export async function mapBlocks(rows: Row[], viewer: Role = "straut"): Promise<B
   }));
 }
 
+export const EVENT_COLS = "id, client_id, date, kind, title, notes";
+
+export function mapEvents(rows: Row[]): CalendarEvent[] {
+  return rows.map((r) => ({ id: r.id, clientId: r.client_id, date: r.date, kind: r.kind, title: r.title, notes: r.notes ?? "" }));
+}
+
 /** Tudo (painel da Straut). */
 export async function loadAll() {
   purgeSoon(); // esvazia o que passou de 30 dias na lixeira
-  const [{ data: clients, error: e1 }, { data: blocks, error: e2 }] = await Promise.all([
+  const [{ data: clients, error: e1 }, { data: blocks, error: e2 }, { data: events, error: e3 }] = await Promise.all([
     db().from("clients").select(CLIENT_COLS).order("name"),
     db().from("blocks").select(BLOCK_COLS).is("deleted_at", null).order("date"),
+    db().from("events").select(EVENT_COLS).is("deleted_at", null).order("date"),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
+  if (e3) throw e3;
   const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [], "straut")]);
-  return { clients: c, blocks: b, loadedAt: Date.now() };
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), loadedAt: Date.now() };
 }
 
 /** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
@@ -140,12 +148,34 @@ export async function findClientBySlug(slug: string) {
 
 /** Dados de uma cliente (página da cliente). */
 export async function loadClient(clientId: string, role: Role) {
-  const [{ data: client, error: e1 }, { data: blocks, error: e2 }] = await Promise.all([
+  const [{ data: client, error: e1 }, { data: blocks, error: e2 }, { data: events, error: e3 }] = await Promise.all([
     db().from("clients").select(CLIENT_COLS).eq("id", clientId).single(),
     db().from("blocks").select(BLOCK_COLS).eq("client_id", clientId).is("deleted_at", null).order("date"),
+    db().from("events").select(EVENT_COLS).eq("client_id", clientId).is("deleted_at", null).order("date"),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
+  if (e3) throw e3;
   const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role)]);
-  return { clients: c, blocks: b, loadedAt: Date.now() };
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), loadedAt: Date.now() };
+}
+
+/** Dia de produção: o evento, as marcações dele e os roteiros já gravados em outros dias de produção. */
+export async function loadProduction(eventId: string, clientId: string) {
+  const { data: ev, error } = await db().from("events").select(EVENT_COLS).eq("id", eventId).eq("client_id", clientId)
+    .is("deleted_at", null).maybeSingle();
+  if (error) throw error;
+  if (!ev) return null;
+  const [{ data: items, error: e1 }, { data: done, error: e2 }] = await Promise.all([
+    db().from("production_items").select("block_id, position, state").eq("event_id", eventId),
+    db().from("production_items").select("block_id, events!inner(client_id, deleted_at)").eq("state", "gravado")
+      .neq("event_id", eventId).eq("events.client_id", clientId).is("events.deleted_at", null),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+  return {
+    event: mapEvents([ev])[0],
+    items: (items ?? []).map((i) => ({ blockId: i.block_id, position: i.position, state: i.state })) as ProductionItem[],
+    doneElsewhere: [...new Set((done ?? []).map((d) => d.block_id as string))],
+  };
 }

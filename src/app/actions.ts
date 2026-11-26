@@ -8,10 +8,10 @@ import { AccessError, clientCookieName, makeClientToken, requireAdmin, requireCl
 import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
 import { FORMATS, PLANNED } from "@/lib/meta";
-import { loadBlock } from "@/lib/data";
+import { EVENT_COLS, loadBlock, mapEvents } from "@/lib/data";
 import { driveFileId, drivePath } from "@/lib/drive";
-import { listTrash, purgeItem, restoreItem, trashBlock, trashFile, trashMedia, type TrashEntry, type TrashKind } from "@/lib/trash";
-import type { Block, ClientInput, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
+import { listTrash, purgeItem, restoreItem, trashBlock, trashEvent, trashFile, trashMedia, type TrashEntry, type TrashKind } from "@/lib/trash";
+import type { Block, CalendarEvent, ClientInput, ProductionState, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -512,7 +512,7 @@ export async function fileDownloadUrl(fileId: string): Promise<Result<string>> {
 // Lixeira (30 dias)
 // ---------------------------------------------------------------------------
 
-const TRASH_KINDS: TrashKind[] = ["bloco", "midia", "arquivo"];
+const TRASH_KINDS: TrashKind[] = ["bloco", "midia", "arquivo", "evento"];
 
 export async function getTrash(): Promise<Result<TrashEntry[]>> {
   return run(async () => {
@@ -540,6 +540,107 @@ export async function purgeFromTrash(kind: TrashKind, id: string): Promise<Resul
     await requireAdmin();
     if (!TRASH_KINDS.includes(kind) || !UUID.test(id)) throw new AccessError("Item inválido.");
     await purgeItem(kind, id);
+    return null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Eventos do calendário (dia de produção)
+// ---------------------------------------------------------------------------
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+async function getEvent(id: string) {
+  if (!UUID.test(id)) throw new AccessError("Evento inválido.");
+  const { data } = await db().from("events").select(EVENT_COLS).eq("id", id).is("deleted_at", null).maybeSingle();
+  if (!data) throw new AccessError("Evento não encontrado.");
+  return data as any;
+}
+
+/** O id vem do navegador para o evento aparecer na hora. */
+export async function createEvent(id: string, clientId: string, date: string): Promise<Result<CalendarEvent>> {
+  return run(async () => {
+    await requireAdmin();
+    if (!UUID.test(id) || !UUID.test(clientId) || !YMD.test(date)) throw new AccessError("Dados inválidos.");
+    const { data, error } = await db().from("events").insert({ id, client_id: clientId, date, kind: "producao" }).select(EVENT_COLS).single();
+    if (error) throw error;
+    return mapEvents([data])[0];
+  });
+}
+
+export async function updateEvent(id: string, patch: { date?: string; title?: string; notes?: string }): Promise<Result<CalendarEvent>> {
+  return run(async () => {
+    await requireAdmin();
+    await getEvent(id);
+    const clean: Record<string, string> = {};
+    if (patch.date !== undefined) {
+      if (!YMD.test(patch.date)) throw new AccessError("Data inválida.");
+      clean.date = patch.date;
+    }
+    if (patch.title !== undefined) clean.title = patch.title.trim().slice(0, 120) || "Produção de conteúdo";
+    if (patch.notes !== undefined) clean.notes = patch.notes.slice(0, 4000);
+    const { data, error } = await db().from("events").update(clean).eq("id", id).select(EVENT_COLS).single();
+    if (error) throw error;
+    return mapEvents([data])[0];
+  });
+}
+
+export async function deleteEvent(id: string): Promise<Result<boolean>> {
+  return run(async () => {
+    await requireAdmin();
+    await getEvent(id);
+    await trashEvent(id, "Straut");
+    return true;
+  });
+}
+
+/** Confere que os blocos são da mesma cliente do evento. */
+async function checkEventBlocks(ev: any, ids: string[]) {
+  if (!ids.length) return;
+  if (ids.some((i) => !UUID.test(i))) throw new AccessError("Conteúdo inválido.");
+  const { data } = await db().from("blocks").select("id").eq("client_id", ev.client_id).in("id", ids);
+  if ((data ?? []).length !== new Set(ids).size) throw new AccessError("Conteúdo não encontrado.");
+}
+
+/** Nova ordem da lista "Para gravar" (não muda a data de publicação). */
+export async function setProductionOrder(eventId: string, ids: string[]): Promise<Result> {
+  return run(async () => {
+    await requireAdmin();
+    const ev = await getEvent(eventId);
+    if (ids.length > 500) throw new AccessError("Lista grande demais.");
+    await checkEventBlocks(ev, ids);
+    const { data: current } = await db().from("production_items").select("block_id, state").eq("event_id", eventId).in("block_id", ids);
+    const state = new Map((current ?? []).map((c) => [c.block_id, c.state]));
+    const rows = ids.map((block_id, position) => ({
+      event_id: eventId, block_id, position, state: state.get(block_id) ?? "pendente", updated_at: new Date().toISOString(),
+    }));
+    const { error } = await db().from("production_items").upsert(rows, { onConflict: "event_id,block_id" });
+    if (error) throw error;
+    return null;
+  });
+}
+
+const PROD_STATES: ProductionState[] = ["pendente", "gravado", "oculto"];
+
+/** Marca um roteiro como gravado, escondido ou de volta para gravar. Só visual: o bloco não muda. */
+export async function setProductionState(eventId: string, blockId: string, state: ProductionState): Promise<Result> {
+  return run(async () => {
+    await requireAdmin();
+    if (!PROD_STATES.includes(state)) throw new AccessError("Marcação inválida.");
+    const ev = await getEvent(eventId);
+    await checkEventBlocks(ev, [blockId]);
+    const { data: cur } = await db().from("production_items").select("position").eq("event_id", eventId).eq("block_id", blockId).maybeSingle();
+    let position = cur?.position as number | undefined;
+    if (position === undefined) {
+      const { data: last } = await db().from("production_items").select("position").eq("event_id", eventId)
+        .order("position", { ascending: false }).limit(1);
+      position = (last?.[0]?.position ?? -1) + 1;
+    }
+    const { error } = await db().from("production_items").upsert(
+      { event_id: eventId, block_id: blockId, position, state, updated_at: new Date().toISOString() },
+      { onConflict: "event_id,block_id" },
+    );
+    if (error) throw error;
     return null;
   });
 }

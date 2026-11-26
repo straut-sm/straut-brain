@@ -6,11 +6,12 @@ import * as A from "@/app/actions";
 import type { Result } from "@/app/actions";
 import { hueOf } from "./meta";
 import { browserClient } from "./supabase/browser";
-import type { Block, Client, ClientInput, FileKind, Format, MediaKind, PostFormat, Role, Status } from "./types";
+import type { Block, CalendarEvent, Client, ClientInput, FileKind, Format, MediaKind, PostFormat, Role, Status } from "./types";
 
 interface Data {
   clients: Client[];
   blocks: Block[];
+  events: CalendarEvent[];
   /** Momento em que o servidor gerou estes dados. */
   loadedAt: number;
 }
@@ -34,6 +35,9 @@ interface Store extends Data {
   addComment: (id: string, text: string) => Promise<void>;
   markCommentsSeen: (id: string) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
+  createEvent: (clientId: string, date: string) => Promise<string | null>;
+  updateEvent: (id: string, patch: Partial<Pick<CalendarEvent, "date" | "title" | "notes">>) => Promise<void>;
+  deleteEvent: (id: string) => Promise<boolean>;
   saveClient: (id: string | null, input: ClientInput) => Promise<{ id: string; slug: string } | null>;
   setActive: (id: string, active: boolean) => Promise<void>;
   setAvatar: (clientId: string, image: Blob | null) => Promise<void>;
@@ -248,6 +252,26 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       return r.ok ? { ok: true, data: null } : r;
     }),
 
+    createEvent: async (clientId, date) => {
+      const id = crypto.randomUUID();
+      const ev: CalendarEvent = { id, clientId, date, kind: "producao", title: "Produção de conteúdo", notes: "" };
+      setData((d) => ({ ...d, events: [...d.events, ev] }));
+      const saved = await call(() => A.createEvent(id, clientId, date), false);
+      if (!saved) { setData((d) => ({ ...d, events: d.events.filter((e) => e.id !== id) })); return null; }
+      return id;
+    },
+    updateEvent: async (id, patch) => {
+      setData((d) => ({ ...d, events: d.events.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+      const saved = await call(() => A.updateEvent(id, patch), false);
+      if (saved) setData((d) => ({ ...d, events: d.events.map((e) => (e.id === id ? saved : e)) }));
+      else refresh();
+    },
+    deleteEvent: async (id) => {
+      const ok = await call(() => A.deleteEvent(id), false);
+      if (ok) setData((d) => ({ ...d, events: d.events.filter((e) => e.id !== id) }));
+      return !!ok;
+    },
+
     saveClient: (id, input) => call(() => A.saveClient(id, input)),
     setActive: async (id, active) => { await call(() => A.setActive(id, active)); },
 
@@ -305,7 +329,7 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       const url = await call(() => A.fileDownloadUrl(fileId), false);
       if (url) window.location.href = url;
     },
-  }), [data, role, author, pending, refreshing, call, blockOp, upload, uploading]);
+  }), [data, role, author, pending, refreshing, call, blockOp, upload, uploading, refresh]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

@@ -1,17 +1,17 @@
 "use client";
 
 import {
-  ArrowLeft, ArrowRight, Check, Download, Eye, FileText, FolderOpen, Grid3x3, Image as ImageIcon, Link2, Loader2, Plus,
+  ArrowLeft, ArrowRight, Camera, Check, Download, Eye, FileText, FolderOpen, Grid3x3, Image as ImageIcon, Link2, Loader2, Plus,
   Power, Presentation, Settings2, Trash2, Upload, Video, X, File,
 } from "lucide-react";
 import FeedView from "@/components/FeedView";
 import ClientForm from "@/components/ClientForm";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Block, Client, FileKind, PostFormat } from "@/lib/types";
-import { MONTHS, formatShort, inMonth, todayYmd } from "@/lib/dates";
+import { MONTHS, formatLong, formatShort, inMonth, todayYmd } from "@/lib/dates";
 import { FORMATS, PLANNED, PLANNED_ORDER, statusLabel } from "@/lib/meta";
 import Calendar, { StatusLegend } from "@/components/Calendar";
 import BlockModal from "@/components/BlockModal";
@@ -20,7 +20,10 @@ import { Button, Logo, SectionTitle, StatusDot } from "@/components/ui";
 /** Página da cliente. mode "straut" = edição (/c/[slug]); "cliente" = link compartilhado (/p/[slug]). */
 export default function ClientView({ slug, mode }: { slug: string; mode: "straut" | "cliente" }) {
   const params = useSearchParams();
+  const router = useRouter();
   const store = useStore();
+  // Dia escolhido no "+" do calendário: pergunta se é conteúdo ou dia de produção
+  const [addDate, setAddDate] = useState<string | null>(null);
   const client = store.getClient(slug);
   const isClient = mode === "cliente";
 
@@ -60,6 +63,7 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   }, [openId]);
 
   const blocks = useMemo(() => store.blocks.filter((b) => b.clientId === client?.id), [store.blocks, client]);
+  const events = useMemo(() => store.events.filter((e) => e.clientId === client?.id), [store.events, client]);
   const pending = blocks.filter((b) => b.status === "aguardando_aprovacao");
   const suggestions = blocks.filter((b) => b.status === "ajuste_sugerido");
   const scripts = blocks
@@ -105,8 +109,17 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   };
 
   const addBlock = async (date: string) => {
+    setAddDate(null);
     const id = await store.createBlock(client.id, date);
     if (id) { setFresh(id); setOpen(id); }
+  };
+
+  const base = isClient ? `/p/${client.slug}` : `/c/${client.slug}`;
+  const openEvent = (id: string) => router.push(`${base}/producao/${id}`);
+  const addEvent = async (date: string) => {
+    setAddDate(null);
+    const id = await store.createEvent(client.id, date);
+    if (id) openEvent(id);
   };
 
   return (
@@ -268,8 +281,11 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
             month={ym.m}
             onMonthChange={(y, m) => setYm({ y, m })}
             onOpen={setOpen}
-            onAdd={isClient ? undefined : addBlock}
+            onAdd={isClient ? undefined : setAddDate}
             onMove={isClient ? undefined : (id, date) => store.updateBlock(id, { date })}
+            events={events}
+            onOpenEvent={openEvent}
+            onMoveEvent={isClient ? undefined : (id, date) => store.updateEvent(id, { date })}
             focusPending={focusPending}
             showNews={!isClient}
             headerExtra={
@@ -282,12 +298,15 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <StatusLegend />
             {!isClient && (
-              <span className="hidden items-center gap-1 text-[11px] text-muted md:inline-flex"><Plus size={12} /> Passe o mouse em um dia para criar um conteúdo · arraste um bloco para mudar a data</span>
+              <span className="hidden items-center gap-1 text-[11px] text-muted md:inline-flex"><Plus size={12} /> Passe o mouse em um dia para criar um conteúdo ou um dia de produção · arraste um bloco para mudar a data</span>
             )}
           </div>
         </section>
       </main>
 
+      {addDate && (
+        <AddChooser date={addDate} onClose={() => setAddDate(null)} onContent={() => addBlock(addDate)} onProduction={() => addEvent(addDate)} />
+      )}
       {filesOpen && <FilesDrawer client={client} canEdit={!isClient} onClose={() => setFilesOpen(false)} />}
       {feedOpen && (
         <FeedView client={client} blocks={blocks} onClose={() => setFeedOpen(false)} onOpen={setOpen} paused={!!openId} />
@@ -305,6 +324,46 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
           position={idx >= 0 && seq.length > 1 ? `${idx + 1} de ${seq.length}` : undefined}
         />
       )}
+    </div>
+  );
+}
+
+/** O "+" do calendário: criar um conteúdo ou um dia de produção. */
+function AddChooser({ date, onClose, onContent, onProduction }: {
+  date: string; onClose: () => void; onContent: () => void; onProduction: () => void;
+}) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="animate-fade fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-4 sm:items-center" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-label="Criar no calendário" className="animate-pop w-full max-w-sm rounded-2xl bg-paper p-5 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Criar em</p>
+            <p className="font-display text-lg font-semibold first-letter:uppercase">{formatLong(date)}</p>
+          </div>
+          <button aria-label="Fechar" onClick={onClose} className="rounded-lg p-1.5 text-graphite hover:bg-cream"><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-2">
+          <button onClick={onContent} className="flex items-center gap-3 rounded-xl border border-mist p-3 text-left hover:border-sand hover:bg-cream">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cream text-graphite"><FileText size={17} strokeWidth={1.7} /></span>
+            <span>
+              <span className="block text-sm font-medium">Conteúdo</span>
+              <span className="block text-xs text-muted">Roteiro, reels, carrossel ou foto</span>
+            </span>
+          </button>
+          <button onClick={onProduction} className="flex items-center gap-3 rounded-xl bg-ink p-3 text-left text-paper hover:bg-graphite">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-paper/10"><Camera size={17} strokeWidth={1.7} /></span>
+            <span>
+              <span className="block text-sm font-medium">Dia de produção de conteúdo</span>
+              <span className="block text-xs text-paper/60">Lista dos roteiros para gravar no dia</span>
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

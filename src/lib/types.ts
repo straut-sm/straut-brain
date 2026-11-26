@@ -130,3 +130,24 @@ export interface ClientInput {
   /** Nova senha da página. Vazio = manter a atual (na edição). */
   password: string;
 }
+
+/** Evento no calendário (não é post: não conta na meta). Por enquanto só "producao". */
+export type EventKind = "producao";
+
+export interface CalendarEvent {
+  id: string;
+  clientId: string;
+  date: string; // YYYY-MM-DD
+  kind: EventKind;
+  title: string;
+  notes: string;
+}
+
+/** Marcação de um roteiro no dia de produção (só visual, não muda o bloco). */
+export type ProductionState = "pendente" | "gravado" | "oculto";
+
+export interface ProductionItem {
+  blockId: string;
+  position: number;
+  state: ProductionState;
+}

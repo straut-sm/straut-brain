@@ -6,6 +6,7 @@ import {
 import TrashDrawer from "@/components/TrashDrawer";
 import { signOut } from "@/app/actions";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Block, Client } from "@/lib/types";
@@ -37,6 +38,16 @@ export default function ControlPage() {
   const activeIds = useMemo(() => new Set(active.map((c) => c.id)), [active]);
   const activeBlocks = useMemo(() => store.blocks.filter((b) => activeIds.has(b.clientId)), [store.blocks, activeIds]);
 
+  const router = useRouter();
+  const shownEvents = useMemo(
+    () => store.events.filter((e) => active.some((c) => c.id === e.clientId) && (selected.size === 0 || selected.has(e.clientId))),
+    [store.events, active, selected],
+  );
+  const openEvent = (id: string) => {
+    const ev = store.events.find((e) => e.id === id);
+    const c = ev && store.clientById(ev.clientId);
+    if (c) router.push(`/c/${c.slug}/producao/${id}`);
+  };
   const filtered = useMemo(
     () => activeBlocks.filter((b) =>
       (selected.size === 0 || selected.has(b.clientId)) &&
@@ -189,6 +200,9 @@ export default function ControlPage() {
               onMonthChange={(y, m) => setYm({ y, m })}
               onOpen={setOpen}
               onMove={(id, date) => store.updateBlock(id, { date })}
+              events={shownEvents}
+              onOpenEvent={openEvent}
+              onMoveEvent={(id, date) => store.updateEvent(id, { date })}
               clientsById={store.clientById}
               showNews
               headerExtra={

@@ -1,13 +1,13 @@
 "use client";
 
-import { FileText, Image as ImageIcon, LayoutGrid, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { CalendarDays, FileText, Image as ImageIcon, LayoutGrid, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getTrash, purgeFromTrash, restoreFromTrash } from "@/app/actions";
 import type { TrashEntry } from "@/lib/trash";
 import { formatDateTime } from "@/lib/dates";
 
-const ICON = { bloco: LayoutGrid, midia: ImageIcon, arquivo: FileText } as const;
+const ICON = { bloco: LayoutGrid, midia: ImageIcon, arquivo: FileText, evento: CalendarDays } as const;
 
 /** Lixeira do painel: o que foi apagado fica 30 dias, pode ser restaurado ou apagado de vez. */
 export default function TrashDrawer({ onClose }: { onClose: () => void }) {

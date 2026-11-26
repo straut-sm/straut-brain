@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import type { Block, Client } from "@/lib/types";
+import type { Block, CalendarEvent, Client } from "@/lib/types";
 import { FORMATS, STATUSES, statusLabel } from "@/lib/meta";
 import { MONTHS, WEEKDAYS_SHORT, formatLong, inMonth, monthWeeks, todayYmd, ymd } from "@/lib/dates";
 import { StatusDot } from "./ui";
@@ -17,6 +17,11 @@ export type CalendarProps = {
   /** Quando existe, os blocos podem ser arrastados para outro dia (só no desktop). */
   onMove?: (id: string, date: string) => void;
   clientsById?: (id: string) => Client | undefined;
+  /** Eventos (dia de produção). Aparecem no topo do dia. */
+  events?: CalendarEvent[];
+  onOpenEvent?: (id: string) => void;
+  /** Quando existe, os eventos podem ser arrastados para outro dia (só no desktop). */
+  onMoveEvent?: (id: string, date: string) => void;
   /** Destaca só o que está aguardando aprovação (os demais ficam esmaecidos). */
   focusPending?: boolean;
   /** Mostra a bolinha de novidade (sugestão/comentário da cliente) — só para a Straut. */
@@ -34,10 +39,14 @@ function sortBlocks(a: Block, b: Block) {
 }
 
 export default function Calendar(props: CalendarProps) {
-  const { year, month, onMonthChange, blocks, headerExtra, toolbar } = props;
+  const { year, month, onMonthChange, blocks, headerExtra, toolbar, events } = props;
   const monthBlocks = useMemo(
     () => blocks.filter((b) => inMonth(b.date, year, month)).sort(sortBlocks),
     [blocks, year, month],
+  );
+  const monthEvents = useMemo(
+    () => (events ?? []).filter((e) => inMonth(e.date, year, month)).sort((a, b) => a.date.localeCompare(b.date) || a.clientId.localeCompare(b.clientId)),
+    [events, year, month],
   );
 
   const go = (delta: number) => {
@@ -63,10 +72,10 @@ export default function Calendar(props: CalendarProps) {
       </div>
       {toolbar && <div className="border-b border-mist px-4 py-2.5 md:px-5">{toolbar}</div>}
       <div className="hidden md:block">
-        <DesktopGrid {...props} monthBlocks={monthBlocks} />
+        <DesktopGrid {...props} monthBlocks={monthBlocks} monthEvents={monthEvents} />
       </div>
       <div className="md:hidden">
-        <MobileView {...props} monthBlocks={monthBlocks} />
+        <MobileView {...props} monthBlocks={monthBlocks} monthEvents={monthEvents} />
       </div>
     </div>
   );
@@ -112,20 +121,62 @@ function Chip({ block, client, dim, onOpen, showNews, draggable = false, draggin
   );
 }
 
+function EventChip({ event, client, onOpen, draggable = false, dragging = false, onDragStart, onDragEnd }: {
+  event: CalendarEvent; client?: Client; onOpen?: () => void;
+  draggable?: boolean; dragging?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
+}) {
+  return (
+    <button
+      onClick={onOpen}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => {
+        e.dataTransfer.setData("text/plain", `evento:${event.id}`);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      } : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
+      title={draggable ? "Abrir o dia de produção · arraste para mudar a data" : "Abrir o dia de produção"}
+      className={`relative w-full rounded-lg bg-ink py-1.5 pl-2.5 pr-2 text-left text-paper transition hover:-translate-y-px hover:bg-graphite ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${dragging ? "opacity-40" : ""}`}
+    >
+      {client && (
+        <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-r" style={{ background: client.color }} />
+      )}
+      {client && (
+        <span className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-paper/70">{client.name}</span>
+      )}
+      <span className="flex items-start gap-1.5 text-[12px] font-medium leading-snug">
+        <Camera size={12} strokeWidth={1.9} className="mt-[3px] shrink-0" />
+        <span className="line-clamp-2">{event.title}</span>
+      </span>
+    </button>
+  );
+}
+
 function DesktopGrid({
-  year, month, monthBlocks, onOpen, onAdd, onMove, clientsById, focusPending, showNews,
-}: CalendarProps & { monthBlocks: Block[] }) {
+  year, month, monthBlocks, monthEvents, onOpen, onAdd, onMove, onOpenEvent, onMoveEvent, clientsById, focusPending, showNews,
+}: CalendarProps & { monthBlocks: Block[]; monthEvents: CalendarEvent[] }) {
   const weeks = monthWeeks(year, month);
   const today = todayYmd();
+  // Arrastando: "b:<id>" (bloco) ou "e:<id>" (evento)
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const dragFrom = dragId ? monthBlocks.find((b) => b.id === dragId)?.date : undefined;
+  const dragFrom = dragId
+    ? dragId.startsWith("e:")
+      ? monthEvents.find((e) => e.id === dragId.slice(2))?.date
+      : monthBlocks.find((b) => b.id === dragId.slice(2))?.date
+    : undefined;
   const endDrag = () => { setDragId(null); setOver(null); };
+  const canDrop = !!dragId && (dragId.startsWith("e:") ? !!onMoveEvent : !!onMove);
   const byDay = useMemo(() => {
     const m = new Map<string, Block[]>();
     monthBlocks.forEach((b) => m.set(b.date, [...(m.get(b.date) ?? []), b]));
     return m;
   }, [monthBlocks]);
+  const eventsByDay = useMemo(() => {
+    const m = new Map<string, CalendarEvent[]>();
+    monthEvents.forEach((e) => m.set(e.date, [...(m.get(e.date) ?? []), e]));
+    return m;
+  }, [monthEvents]);
 
   return (
     <div>
@@ -144,18 +195,21 @@ function DesktopGrid({
             return (
               <div
                 key={di}
-                onDragOver={onMove && dragId ? (e) => {
+                onDragOver={canDrop ? (e) => {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   if (over !== date) setOver(date);
                 } : undefined}
-                onDragLeave={onMove && dragId ? (e) => {
+                onDragLeave={canDrop ? (e) => {
                   if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === date ? null : o));
                 } : undefined}
-                onDrop={onMove && dragId ? (e) => {
+                onDrop={canDrop ? (e) => {
                   e.preventDefault();
-                  const id = e.dataTransfer.getData("text/plain") || dragId;
-                  if (id && date !== dragFrom) onMove(id, date);
+                  if (dragId && date !== dragFrom) {
+                    const id = dragId.slice(2);
+                    if (dragId.startsWith("e:")) onMoveEvent?.(id, date);
+                    else onMove?.(id, date);
+                  }
                   endDrag();
                 } : undefined}
                 className={`group/day relative min-h-[112px] border-r border-mist p-1.5 transition-colors last:border-r-0 ${over === date && date !== dragFrom ? "bg-cream ring-2 ring-inset ring-sand" : ""}`}
@@ -177,6 +231,18 @@ function DesktopGrid({
                   )}
                 </div>
                 <div className="flex flex-col gap-1">
+                  {(eventsByDay.get(date) ?? []).map((ev) => (
+                    <EventChip
+                      key={ev.id}
+                      event={ev}
+                      client={clientsById?.(ev.clientId)}
+                      onOpen={onOpenEvent ? () => onOpenEvent(ev.id) : undefined}
+                      draggable={!!onMoveEvent}
+                      dragging={dragId === `e:${ev.id}`}
+                      onDragStart={() => setDragId(`e:${ev.id}`)}
+                      onDragEnd={endDrag}
+                    />
+                  ))}
                   {items.map((b) => (
                     <Chip
                       key={b.id}
@@ -186,8 +252,8 @@ function DesktopGrid({
                       showNews={showNews}
                       onOpen={() => onOpen(b.id)}
                       draggable={!!onMove}
-                      dragging={dragId === b.id}
-                      onDragStart={() => setDragId(b.id)}
+                      dragging={dragId === `b:${b.id}`}
+                      onDragStart={() => setDragId(`b:${b.id}`)}
                       onDragEnd={endDrag}
                     />
                   ))}
@@ -202,8 +268,8 @@ function DesktopGrid({
 }
 
 function MobileView({
-  year, month, monthBlocks, onOpen, onAdd, clientsById, focusPending,
-}: CalendarProps & { monthBlocks: Block[] }) {
+  year, month, monthBlocks, monthEvents, onOpen, onAdd, onOpenEvent, clientsById, focusPending,
+}: CalendarProps & { monthBlocks: Block[]; monthEvents: CalendarEvent[] }) {
   const [onlyPending, setOnlyPending] = useState(!!focusPending);
   const [selected, setSelected] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -212,11 +278,17 @@ function MobileView({
   const pendingCount = monthBlocks.filter(isPending).length;
 
   const shown = onlyPending ? monthBlocks.filter(isPending) : monthBlocks;
+  const eventsByDay = useMemo(() => {
+    const m = new Map<string, CalendarEvent[]>();
+    monthEvents.forEach((e) => m.set(e.date, [...(m.get(e.date) ?? []), e]));
+    return m;
+  }, [monthEvents]);
   const groups = useMemo(() => {
     const m = new Map<string, Block[]>();
+    if (!onlyPending) monthEvents.forEach((e) => m.set(e.date, m.get(e.date) ?? []));
     shown.forEach((b) => m.set(b.date, [...(m.get(b.date) ?? []), b]));
-    return [...m.entries()];
-  }, [shown]);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [shown, monthEvents, onlyPending]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, Block[]>();
@@ -226,7 +298,7 @@ function MobileView({
 
   const pick = (date: string) => {
     setSelected(date);
-    if (onlyPending && !(byDay.get(date) ?? []).some(isPending)) setOnlyPending(false);
+    if (onlyPending && (eventsByDay.has(date) || !(byDay.get(date) ?? []).some(isPending))) setOnlyPending(false);
     requestAnimationFrame(() => {
       document.getElementById(`dia-${date}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -245,14 +317,15 @@ function MobileView({
               if (day === null) return <div key={di} />;
               const date = ymd(year, month, day);
               const items = byDay.get(date) ?? [];
+              const dayEvents = eventsByDay.get(date) ?? [];
               const isSel = selected === date;
               return (
                 <button
                   key={di}
-                  onClick={() => (items.length ? pick(date) : onAdd ? onAdd(date) : undefined)}
+                  onClick={() => (items.length || dayEvents.length ? pick(date) : onAdd ? onAdd(date) : undefined)}
                   className={`flex h-12 flex-col items-center justify-start gap-1 rounded-lg pt-1.5 ${isSel ? "bg-cream ring-1 ring-sand" : ""}`}
                 >
-                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] ${date === today ? "bg-ink font-semibold text-paper" : "text-graphite"}`}>
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] ${date === today ? "bg-ink font-semibold text-paper" : dayEvents.length ? "font-semibold text-ink ring-1 ring-ink" : "text-graphite"}`}>
                     {day}
                   </span>
                   <span className="flex max-w-full flex-wrap justify-center gap-[3px] px-0.5">
@@ -294,6 +367,27 @@ function MobileView({
           <div key={date} id={`dia-${date}`} className="scroll-mt-14 pt-4">
             <p className={`mb-2 text-xs font-semibold first-letter:uppercase ${selected === date ? "text-ink" : "text-muted"}`}>{formatLong(date)}</p>
             <div className="flex flex-col gap-2">
+              {!onlyPending && (eventsByDay.get(date) ?? []).map((ev) => {
+                const client = clientsById?.(ev.clientId);
+                return (
+                  <button
+                    key={ev.id}
+                    onClick={() => onOpenEvent?.(ev.id)}
+                    className="relative flex items-center gap-3 rounded-xl bg-ink py-3 pl-4 pr-3 text-left text-paper active:bg-graphite"
+                  >
+                    {client && <span className="absolute inset-y-2 left-0 w-[3px] rounded-r" style={{ background: client.color }} />}
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-paper/10">
+                      <Camera size={17} strokeWidth={1.7} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      {client && <span className="block truncate text-[10px] font-semibold uppercase tracking-wide text-paper/70">{client.name}</span>}
+                      <span className="block truncate text-sm font-medium">{ev.title}</span>
+                      <span className="mt-0.5 block text-[11px] text-paper/60">Abrir a lista de gravação</span>
+                    </span>
+                    <ChevronRight size={16} className="shrink-0 text-paper/60" />
+                  </button>
+                );
+              })}
               {items.map((b) => {
                 const client = clientsById?.(b.clientId);
                 const Icon = FORMATS[b.format].icon;

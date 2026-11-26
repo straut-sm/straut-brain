@@ -10,6 +10,8 @@ Sistema interno da Straut Marketing para controlar conteúdos, aprovações e cl
 | `/` | Straut | Painel de controle |
 | `/c/[cliente]` | Straut | Página da cliente em modo de edição |
 | `/p/[cliente]` | Cliente | Link compartilhado com a senha da página, sem conta |
+| `/c/[cliente]/producao/[id]` | Straut | Dia de produção: roteiros para gravar, em lista (ordem, gravado, escondido) |
+| `/p/[cliente]/producao/[id]` | Cliente | O mesmo dia de produção, só para ver |
 | `/api/bots/...` | Bots (OpenBot) | API dos bots, com a chave `BOTS_API_KEY` (veja abaixo) |
 
 Produção: `painel.strautmarketing.com` (Vercel).
@@ -57,6 +59,13 @@ time: `straut-team/integracoes/api-dos-bots.md`.
   cliente vê só "Straut".
 - Comentários dos bots são internos (`block_comments.internal`): só a Straut vê.
 - Nunca devolve senha, dia de pagamento, observações, arquivos da cliente nem chaves.
+
+## Dia de produção
+
+Evento no calendário (tabela `events`, `kind = producao`). Não é post: não conta na meta e não tem status.
+A página lista os roteiros da cliente ainda não gravados em outro dia de produção. A ordem e as marcações
+(`production_items.state`: `pendente`, `gravado`, `oculto`) são só visuais: não mudam a data nem o status do bloco.
+Apagar o evento manda para a Lixeira. Código em `src/components/ProductionView.tsx`.
 
 ## Como rodar
 
