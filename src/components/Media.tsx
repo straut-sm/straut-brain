@@ -91,8 +91,8 @@ function RemoveButton({ item, label }: { item: MediaItem; label: string }) {
   return (
     <button
       onClick={() => confirm(item.driveId
-        ? `Remover ${label}? Só o link sai do painel; o arquivo continua no Google Drive.`
-        : `Remover ${label}? O arquivo será apagado.`) && store.removeMedia(item.id)}
+        ? `Remover ${label}? O link fica 30 dias na Lixeira; o arquivo continua no Google Drive.`
+        : `Remover ${label}? Ela fica 30 dias na Lixeira e pode ser restaurada.`) && store.removeMedia(item.id)}
       aria-label={`Remover ${label}`}
       className="rounded-full bg-paper/90 p-1.5 text-graphite shadow hover:text-[#b9583a]"
     >

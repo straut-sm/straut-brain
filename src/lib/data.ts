@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "./supabase/admin";
 import { hueOf } from "./meta";
 import { driveIdOf, drivePreviewUrl, isDrivePath } from "./drive";
+import { purgeSoon } from "./trash";
 import type { Block, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -45,9 +46,9 @@ export function formatSize(bytes: number) {
 type Row = Record<string, any>;
 
 const CLIENT_COLS =
-  "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, instagram_url, tiktok_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at)";
-const BLOCK_COLS =
-  "id, client_id, date, title, format, planned_format, status, caption, script, suggestion, block_media(id, kind, path, position), block_history(id, at, author, action, before), block_comments(id, at, author, text, seen)";
+  "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, instagram_url, tiktok_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at, deleted_at)";
+export const BLOCK_COLS =
+  "id, client_id, date, title, format, planned_format, status, caption, script, suggestion, block_media(id, kind, path, position, deleted_at), block_history(id, at, author, action, before, bot), block_comments(id, at, author, text, seen, bot, internal)";
 
 async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
   const avatars = await signMany("midia", rows.map((r) => r.avatar_path).filter(Boolean));
@@ -66,13 +67,16 @@ async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
     notes: role === "straut" ? r.notes : "",
     avatarUrl: r.avatar_path ? avatars.get(r.avatar_path) : undefined,
     files: ((r.client_files ?? []) as Row[])
+      .filter((f) => !f.deleted_at)
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
       .map((f): ClientFile => ({ id: f.id, name: f.name, kind: f.kind, size: formatSize(Number(f.size_bytes)), at: f.created_at })),
   }));
 }
 
-async function mapBlocks(rows: Row[]): Promise<Block[]> {
-  const paths = rows.flatMap((r) => ((r.block_media ?? []) as Row[]).map((m) => m.path)).filter((p) => !isDrivePath(p));
+/** viewer "cliente": sem comentários internos e sem o nome dos bots. */
+export async function mapBlocks(rows: Row[], viewer: Role = "straut"): Promise<Block[]> {
+  const staff = viewer === "straut";
+  const paths = rows.flatMap((r) => ((r.block_media ?? []) as Row[]).filter((m) => !m.deleted_at).map((m) => m.path)).filter((p) => !isDrivePath(p));
   const urls = await signMany("midia", paths);
   return rows.map((r) => ({
     id: r.id,
@@ -87,36 +91,45 @@ async function mapBlocks(rows: Row[]): Promise<Block[]> {
     suggestion: (r.suggestion as Suggestion | null) ?? undefined,
     hue: hueOf(r.id),
     media: ((r.block_media ?? []) as Row[])
+      .filter((m) => !m.deleted_at)
       .sort((a, b) => a.position - b.position)
       .map((m): MediaItem => isDrivePath(m.path)
         ? { id: m.id, kind: m.kind, url: drivePreviewUrl(driveIdOf(m.path)), driveId: driveIdOf(m.path) }
         : { id: m.id, kind: m.kind, url: urls.get(m.path) ?? "" }),
     history: ((r.block_history ?? []) as Row[])
       .sort((a, b) => (a.at < b.at ? -1 : 1))
-      .map((h): HistoryEntry => ({ id: h.id, at: h.at, by: h.author, action: h.action, before: (h.before as Snapshot | null) ?? undefined })),
+      .map((h): HistoryEntry => ({
+        id: h.id, at: h.at, by: h.author, action: h.action, before: (h.before as Snapshot | null) ?? undefined,
+        ...(staff && h.bot ? { bot: h.bot } : {}),
+      })),
     comments: ((r.block_comments ?? []) as Row[])
+      .filter((c) => staff || !c.internal)
       .sort((a, b) => (a.at < b.at ? -1 : 1))
-      .map((c): Comment => ({ id: c.id, at: c.at, by: c.author, text: c.text, seen: c.seen })),
+      .map((c): Comment => ({
+        id: c.id, at: c.at, by: c.author, text: c.text, seen: c.seen,
+        ...(c.bot ? { bot: c.bot } : {}), ...(c.internal ? { internal: true } : {}),
+      })),
   }));
 }
 
 /** Tudo (painel da Straut). */
 export async function loadAll() {
+  purgeSoon(); // esvazia o que passou de 30 dias na lixeira
   const [{ data: clients, error: e1 }, { data: blocks, error: e2 }] = await Promise.all([
     db().from("clients").select(CLIENT_COLS).order("name"),
-    db().from("blocks").select(BLOCK_COLS).order("date"),
+    db().from("blocks").select(BLOCK_COLS).is("deleted_at", null).order("date"),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-  const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [])]);
+  const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [], "straut")]);
   return { clients: c, blocks: b, loadedAt: Date.now() };
 }
 
 /** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
-export async function loadBlock(id: string): Promise<Block | null> {
-  const { data, error } = await db().from("blocks").select(BLOCK_COLS).eq("id", id).maybeSingle();
+export async function loadBlock(id: string, viewer: Role = "straut"): Promise<Block | null> {
+  const { data, error } = await db().from("blocks").select(BLOCK_COLS).eq("id", id).is("deleted_at", null).maybeSingle();
   if (error) throw error;
-  return data ? (await mapBlocks([data]))[0] : null;
+  return data ? (await mapBlocks([data], viewer))[0] : null;
 }
 
 /** Uma cliente pelo endereço (slug), sem conferir acesso. */
@@ -129,10 +142,10 @@ export async function findClientBySlug(slug: string) {
 export async function loadClient(clientId: string, role: Role) {
   const [{ data: client, error: e1 }, { data: blocks, error: e2 }] = await Promise.all([
     db().from("clients").select(CLIENT_COLS).eq("id", clientId).single(),
-    db().from("blocks").select(BLOCK_COLS).eq("client_id", clientId).order("date"),
+    db().from("blocks").select(BLOCK_COLS).eq("client_id", clientId).is("deleted_at", null).order("date"),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-  const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [])]);
+  const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role)]);
   return { clients: c, blocks: b, loadedAt: Date.now() };
 }

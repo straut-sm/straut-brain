@@ -10,6 +10,7 @@ Sistema interno da Straut Marketing para controlar conteúdos, aprovações e cl
 | `/` | Straut | Painel de controle |
 | `/c/[cliente]` | Straut | Página da cliente em modo de edição |
 | `/p/[cliente]` | Cliente | Link compartilhado com a senha da página, sem conta |
+| `/api/bots/...` | Bots (OpenBot) | API dos bots, com a chave `BOTS_API_KEY` (veja abaixo) |
 
 Produção: `painel.strautmarketing.com` (Vercel).
 
@@ -36,6 +37,26 @@ Copie para `.env.local` (local) e para **Vercel → Settings → Environment Var
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → API Keys → Publishable key |
 | `SUPABASE_SECRET_KEY` | Supabase → API Keys → Secret keys (**nunca** comitar) |
 | `CLIENT_SESSION_SECRET` | Texto aleatório com 32 caracteres ou mais |
+| `BOTS_API_KEY` | Chave da API dos bots: texto aleatório com 32 caracteres ou mais, a mesma no OpenBot. Sem ela, a API fica fechada |
+
+## API dos bots
+
+Porta de acesso dos bots do OpenBot, em `src/app/api/bots/[...path]/route.ts` (roteador) e
+`src/lib/bots.ts` (regras). A documentação completa, com as rotas e exemplos, fica no repositório do
+time: `straut-team/integracoes/api-dos-bots.md`.
+
+- Cabeçalhos: `Authorization: Bearer <BOTS_API_KEY>` e `X-Bot: <nome-do-bot>`.
+- Limite de 60 requisições por minuto por bot; toda chamada fica registrada em `bot_requests`.
+- Os bots podem apagar, marcar como publicado e aceitar sugestões. Aprovar, restaurar versões e o
+  cadastro das clientes continuam só no painel.
+- **Lixeira:** apagar (pelo painel ou pela API) só marca `deleted_at`. O item fica 30 dias na Lixeira
+  (botão no topo do painel), pode ser restaurado e depois é apagado de vez, com os arquivos, pela
+  rotina diária `/api/cron/lixeira` (Vercel Cron, `vercel.json`) e por uma limpeza oportunista ao abrir
+  o painel. Código em `src/lib/trash.ts`.
+- O histórico guarda o nome do bot em `block_history.bot`. A Straut vê "Straut · bot design"; a
+  cliente vê só "Straut".
+- Comentários dos bots são internos (`block_comments.internal`): só a Straut vê.
+- Nunca devolve senha, dia de pagamento, observações, arquivos da cliente nem chaves.
 
 ## Como rodar
 

@@ -421,7 +421,7 @@ function FilesDrawer({ client, onClose, canEdit }: { client: Client; onClose: ()
                   </button>
                   {canEdit && (
                     <button
-                      onClick={() => confirm(`Remover "${f.name}" da página da cliente? O arquivo será apagado.`) && store.removeFile(f.id)}
+                      onClick={() => confirm(`Remover "${f.name}" da página da cliente? Ele fica 30 dias na Lixeira e pode ser restaurado.`) && store.removeFile(f.id)}
                       aria-label={`Remover ${f.name}`}
                       className="rounded-lg p-2 text-muted hover:bg-[#f6e3dc] hover:text-[#b9583a]"
                     >

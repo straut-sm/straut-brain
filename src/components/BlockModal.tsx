@@ -306,7 +306,7 @@ export default function BlockModal({
             history={block.history}
             onRestore={mode === "straut" ? (hid) => store.restoreVersion(block.id, hid) : undefined}
             onUndo={undo}
-            onDelete={mode === "straut" ? () => { if (confirm("Excluir este bloco? Esta ação não pode ser desfeita.")) { store.deleteBlock(block.id); onClose(); } } : undefined}
+            onDelete={mode === "straut" ? () => { if (confirm("Excluir este bloco? Ele fica 30 dias na Lixeira do painel e pode ser restaurado.")) { store.deleteBlock(block.id); onClose(); } } : undefined}
           />
         )}
       </div>
@@ -611,8 +611,11 @@ function Comments({ block }: { block: Block; mode: ModalMode }) {
       </p>
       <div className="flex flex-col gap-2">
         {block.comments.map((c) => (
-          <div key={c.id} className={`rounded-xl px-3 py-2 text-sm ${c.by === "Cliente" ? "bg-cream" : "border border-mist"}`}>
-            <p className="mb-0.5 text-[11px] text-muted"><span className="font-semibold text-graphite">{c.by}</span> · {formatDateTime(c.at)}</p>
+          <div key={c.id} className={`rounded-xl px-3 py-2 text-sm ${c.by === "Cliente" ? "bg-cream" : c.internal ? "border border-dashed border-sand bg-mist/30" : "border border-mist"}`}>
+            <p className="mb-0.5 text-[11px] text-muted">
+              <span className="font-semibold text-graphite">{c.by}{c.bot && ` · bot ${c.bot}`}</span> · {formatDateTime(c.at)}
+              {c.internal && <span className="ml-1.5 rounded-full bg-mist px-1.5 py-px text-[10px] font-medium text-graphite">interno, a cliente não vê</span>}
+            </p>
             <p className="text-ink">{c.text}</p>
           </div>
         ))}
@@ -671,7 +674,7 @@ function HistoryFooter({ history, onDelete, onRestore, onUndo }: {
             <li key={h.id} className="relative border-l border-sand py-1.5 pl-4">
               <span className={`absolute -left-[4.5px] top-3 h-2 w-2 rounded-full ${h.by === "Cliente" ? "bg-[#c4882c]" : "bg-ink"}`} />
               <p className="text-xs text-ink">
-                <span className="text-muted">{formatDateTime(h.at)}</span> · <span className="font-semibold">{h.by}</span> · {h.action}
+                <span className="text-muted">{formatDateTime(h.at)}</span> · <span className="font-semibold">{h.by}{h.bot && ` · bot ${h.bot}`}</span> · {h.action}
                 {h.before && (
                   <button onClick={() => setPeek(peek === h.id ? null : h.id)} className="ml-2 text-[11px] font-medium text-graphite underline underline-offset-2">
                     {peek === h.id ? "ocultar" : "ver versão anterior"}

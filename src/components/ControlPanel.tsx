@@ -1,8 +1,9 @@
 "use client";
 
 import {
-  ArrowUpRight, Bell, Check, ChevronDown, ImageOff, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2,
+  ArrowUpRight, Bell, Check, ChevronDown, ImageOff, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2, Trash2,
 } from "lucide-react";
+import TrashDrawer from "@/components/TrashDrawer";
 import { signOut } from "@/app/actions";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -29,6 +30,7 @@ export default function ControlPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [form, setForm] = useState<null | "new" | string>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
 
   const active = store.clients.filter((c) => c.active);
   const inactive = store.clients.filter((c) => !c.active);
@@ -89,11 +91,19 @@ export default function ControlPage() {
             <Logo className="h-[18px]" />
             {store.busy && <Loader2 size={15} className="animate-spin text-muted" aria-label="Salvando" />}
           </div>
-          <form action={signOut}>
-            <button className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
-              <LogOut size={13} /> <span className="hidden sm:inline">Sair</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setTrashOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink"
+            >
+              <Trash2 size={13} /> <span className="hidden sm:inline">Lixeira</span>
             </button>
-          </form>
+            <form action={signOut}>
+              <button className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted hover:bg-cream hover:text-ink">
+                <LogOut size={13} /> <span className="hidden sm:inline">Sair</span>
+              </button>
+            </form>
+          </div>
         </div>
       </header>
 
@@ -278,6 +288,7 @@ export default function ControlPage() {
       </main>
 
       {open && <BlockModal key={open} blockId={open} mode="straut" showClient onClose={() => setOpen(null)} />}
+      {trashOpen && <TrashDrawer onClose={() => setTrashOpen(false)} />}
       {form === "new" && <ClientForm onClose={() => setForm(null)} />}
       {editing && <ClientForm key={editing.id} client={editing} onClose={() => setForm(null)} />}
     </div>

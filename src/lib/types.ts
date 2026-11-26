@@ -64,6 +64,8 @@ export interface HistoryEntry {
   action: string;
   /** Versão do bloco ANTES desta ação (quando a ação alterou conteúdo). */
   before?: Snapshot;
+  /** Bot que fez a ação (só aparece para a Straut). */
+  bot?: string;
 }
 
 export interface Suggestion {
@@ -80,6 +82,9 @@ export interface Comment {
   text: string;
   /** Lido pela Straut (para a caixa "Precisa da sua atenção"). */
   seen: boolean;
+  /** Bot que comentou (comentários dos bots são internos: a cliente não vê). */
+  bot?: string;
+  internal?: boolean;
 }
 
 export type MediaKind = "video" | "cover" | "image";

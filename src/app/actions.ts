@@ -9,13 +9,8 @@ import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
 import { FORMATS, PLANNED } from "@/lib/meta";
 import { loadBlock } from "@/lib/data";
-import { driveFileId, drivePath, isDrivePath } from "@/lib/drive";
-
-/** Apaga do armazenamento só os arquivos enviados (links do Drive não ocupam espaço aqui). */
-async function removeStored(paths: string[]) {
-  const stored = paths.filter((p) => !isDrivePath(p));
-  if (stored.length) await db().storage.from("midia").remove(stored);
-}
+import { driveFileId, drivePath } from "@/lib/drive";
+import { listTrash, purgeItem, restoreItem, trashBlock, trashFile, trashMedia, type TrashEntry, type TrashKind } from "@/lib/trash";
 import type { Block, ClientInput, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
@@ -36,6 +31,7 @@ async function getBlock(id: string) {
     .from("blocks")
     .select("id, client_id, date, title, format, planned_format, status, caption, script, suggestion")
     .eq("id", id)
+    .is("deleted_at", null)
     .single();
   if (error || !data) throw new AccessError("Conteúdo não encontrado.");
   return data as any;
@@ -238,7 +234,7 @@ export async function approve(id: string): BlockResult {
       update("blocks", id, { status: "aprovado" }),
       log(id, who, b.format === "roteiro" ? "Roteiro aprovado" : "Post aprovado"),
     ]);
-    return loadBlock(id);
+    return loadBlock(id, who === "Cliente" ? "cliente" : "straut");
   });
 }
 
@@ -257,7 +253,7 @@ export async function suggest(id: string, field: "caption" | "script", proposed:
         log(id, who, `Sugeriu alteração ${field === "caption" ? "na legenda" : "no roteiro"}`),
       ]);
     }
-    return loadBlock(id);
+    return loadBlock(id, who === "Cliente" ? "cliente" : "straut");
   });
 }
 
@@ -288,7 +284,7 @@ export async function addComment(id: string, text: string): BlockResult {
       const { error } = await db().from("block_comments").insert({ block_id: id, author: who, text: t, seen: who === "Straut" });
       if (error) throw error;
     }
-    return loadBlock(id);
+    return loadBlock(id, who === "Cliente" ? "cliente" : "straut");
   });
 }
 
@@ -304,10 +300,8 @@ export async function markCommentsSeen(id: string): BlockResult {
 export async function deleteBlock(id: string): Promise<Result> {
   return run(async () => {
     await requireAdmin();
-    const { data: media } = await db().from("block_media").select("path").eq("block_id", id);
-    const { error } = await db().from("blocks").delete().eq("id", id);
-    if (error) throw error;
-    if (media?.length) await removeStored(media.map((m) => m.path));
+    // Vai para a lixeira (30 dias); some do painel, da página da cliente e da API
+    await trashBlock(id, "Straut");
     return null;
   });
 }
@@ -425,15 +419,12 @@ export async function attachMedia(blockId: string, kind: MediaKind, paths: strin
     const b = await getBlock(blockId);
     if (!paths.every((p) => p.startsWith(`${b.client_id}/${b.id}/`))) throw new AccessError("Caminho inválido.");
     if (kind === "video" || kind === "cover" || (kind === "image" && b.format === "foto")) {
-      // Substitui o arquivo anterior
-      const { data: old } = await db().from("block_media").select("id, path").eq("block_id", blockId).eq("kind", kind);
-      if (old?.length) {
-        await removeStored(old.map((o) => o.path));
-        await db().from("block_media").delete().in("id", old.map((o) => o.id));
-      }
+      // Substitui o arquivo anterior (o antigo vai para a lixeira)
+      const { data: old } = await db().from("block_media").select("id").eq("block_id", blockId).eq("kind", kind).is("deleted_at", null);
+      await trashMedia((old ?? []).map((o) => o.id), "Straut");
     }
     const { data: last } = await db().from("block_media").select("position").eq("block_id", blockId).eq("kind", kind)
-      .order("position", { ascending: false }).limit(1);
+      .is("deleted_at", null).order("position", { ascending: false }).limit(1);
     const start = (last?.[0]?.position ?? -1) + 1;
     const { error } = await db().from("block_media").insert(paths.map((path, i) => ({ block_id: blockId, kind, path, position: start + i })));
     if (error) throw error;
@@ -446,11 +437,10 @@ export async function attachMedia(blockId: string, kind: MediaKind, paths: strin
 export async function removeMedia(mediaId: string): BlockResult {
   return run(async () => {
     await requireAdmin();
-    const { data: m } = await db().from("block_media").select("id, path, block_id").eq("id", mediaId).single();
+    const { data: m } = await db().from("block_media").select("id, block_id").eq("id", mediaId).single();
     if (!m) return null;
-    await removeStored([m.path]);
-    await db().from("block_media").delete().eq("id", mediaId);
-    await log(m.block_id, "Straut", "Removeu uma mídia");
+    await trashMedia([mediaId], "Straut");
+    await log(m.block_id, "Straut", "Moveu uma mídia para a lixeira");
     return loadBlock(m.block_id);
   });
 }
@@ -462,11 +452,8 @@ export async function attachDriveVideo(blockId: string, link: string): BlockResu
     const id = driveFileId(link);
     if (!id) throw new AccessError("Link do Google Drive inválido. Use o link de compartilhamento do arquivo.");
     await getBlock(blockId);
-    const { data: old } = await db().from("block_media").select("id, path").eq("block_id", blockId).eq("kind", "video");
-    if (old?.length) {
-      await removeStored(old.map((o) => o.path));
-      await db().from("block_media").delete().in("id", old.map((o) => o.id));
-    }
+    const { data: old } = await db().from("block_media").select("id").eq("block_id", blockId).eq("kind", "video").is("deleted_at", null);
+    await trashMedia((old ?? []).map((o) => o.id), "Straut");
     const { error } = await db().from("block_media").insert({ block_id: blockId, kind: "video", path: drivePath(id), position: 0 });
     if (error) throw error;
     await log(blockId, "Straut", "Adicionou o vídeo pelo Google Drive");
@@ -478,7 +465,7 @@ export async function attachDriveVideo(blockId: string, link: string): BlockResu
 export async function reorderMedia(blockId: string, ids: string[]): BlockResult {
   return run(async () => {
     await requireAdmin();
-    const { data: cur } = await db().from("block_media").select("id").eq("block_id", blockId).eq("kind", "image");
+    const { data: cur } = await db().from("block_media").select("id").eq("block_id", blockId).eq("kind", "image").is("deleted_at", null);
     const known = new Set((cur ?? []).map((m) => m.id));
     if (ids.length !== known.size || !ids.every((id) => known.has(id))) throw new AccessError("As imagens mudaram. Atualize a página.");
     for (const [i, id] of ids.entries()) {
@@ -505,20 +492,54 @@ export async function registerFile(clientId: string, file: { name: string; kind:
 export async function removeFile(fileId: string): Promise<Result> {
   return run(async () => {
     await requireAdmin();
-    const { data: f } = await db().from("client_files").select("path").eq("id", fileId).single();
-    if (f) await db().storage.from("arquivos").remove([f.path]);
-    await db().from("client_files").delete().eq("id", fileId);
+    await trashFile(fileId, "Straut");
     return null;
   });
 }
 
 export async function fileDownloadUrl(fileId: string): Promise<Result<string>> {
   return run(async () => {
-    const { data: f } = await db().from("client_files").select("client_id, name, path").eq("id", fileId).single();
+    const { data: f } = await db().from("client_files").select("client_id, name, path").eq("id", fileId).is("deleted_at", null).single();
     if (!f) throw new AccessError("Arquivo não encontrado.");
     await requireClientAccess(f.client_id);
     const { data, error } = await db().storage.from("arquivos").createSignedUrl(f.path, 120, { download: f.name });
     if (error) throw error;
     return data.signedUrl;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lixeira (30 dias)
+// ---------------------------------------------------------------------------
+
+const TRASH_KINDS: TrashKind[] = ["bloco", "midia", "arquivo"];
+
+export async function getTrash(): Promise<Result<TrashEntry[]>> {
+  return run(async () => {
+    await requireAdmin();
+    return listTrash();
+  });
+}
+
+export async function restoreFromTrash(kind: TrashKind, id: string): Promise<Result> {
+  return run(async () => {
+    await requireAdmin();
+    if (!TRASH_KINDS.includes(kind) || !UUID.test(id)) throw new AccessError("Item inválido.");
+    await restoreItem(kind, id, "Straut");
+    if (kind === "bloco") await log(id, "Straut", "Restaurou o bloco da lixeira");
+    if (kind === "midia") {
+      const { data: m } = await db().from("block_media").select("block_id").eq("id", id).maybeSingle();
+      if (m) await log(m.block_id, "Straut", "Restaurou uma mídia da lixeira");
+    }
+    return null;
+  });
+}
+
+export async function purgeFromTrash(kind: TrashKind, id: string): Promise<Result> {
+  return run(async () => {
+    await requireAdmin();
+    if (!TRASH_KINDS.includes(kind) || !UUID.test(id)) throw new AccessError("Item inválido.");
+    await purgeItem(kind, id);
+    return null;
   });
 }
