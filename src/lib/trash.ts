@@ -9,7 +9,7 @@ import { isDrivePath } from "./drive";
  */
 
 export const TRASH_DAYS = 30;
-export type TrashKind = "bloco" | "midia" | "arquivo" | "evento";
+export type TrashKind = "bloco" | "midia" | "arquivo" | "evento" | "tendencia";
 
 const now = () => new Date().toISOString();
 const cutoff = () => new Date(Date.now() - TRASH_DAYS * 86_400_000).toISOString();
@@ -35,6 +35,11 @@ export async function trashEvent(id: string, by: string) {
   if (error) throw error;
 }
 
+export async function trashTrend(id: string, by: string) {
+  const { error } = await db().from("trend_items").update({ deleted_at: now(), deleted_by: by }).eq("id", id).is("deleted_at", null);
+  if (error) throw error;
+}
+
 async function removeStorage(bucket: string, paths: string[]) {
   const stored = paths.filter((p) => p && !isDrivePath(p));
   for (let i = 0; i < stored.length; i += 100) {
@@ -45,6 +50,11 @@ async function removeStorage(bucket: string, paths: string[]) {
 
 /** Apaga de vez um item da lixeira (e os arquivos dele). */
 export async function purgeItem(kind: TrashKind, id: string) {
+  if (kind === "tendencia") {
+    const { error } = await db().from("trend_items").delete().eq("id", id).not("deleted_at", "is", null);
+    if (error) throw error;
+    return;
+  }
   if (kind === "evento") {
     const { error } = await db().from("events").delete().eq("id", id).not("deleted_at", "is", null);
     if (error) throw error;
@@ -75,17 +85,19 @@ export async function purgeItem(kind: TrashKind, id: string) {
 /** Esvazia o que passou de 30 dias na lixeira. */
 export async function purgeExpired() {
   const limit = cutoff();
-  const [blocks, media, files, events] = await Promise.all([
+  const [blocks, media, files, events, trends] = await Promise.all([
     db().from("blocks").select("id").lt("deleted_at", limit).limit(200),
     db().from("block_media").select("id").lt("deleted_at", limit).limit(500),
     db().from("client_files").select("id").lt("deleted_at", limit).limit(200),
     db().from("events").select("id").lt("deleted_at", limit).limit(200),
+    db().from("trend_items").select("id").lt("deleted_at", limit).limit(500),
   ]);
+  for (const t of trends.data ?? []) await purgeItem("tendencia", t.id);
   for (const e of events.data ?? []) await purgeItem("evento", e.id);
   for (const b of blocks.data ?? []) await purgeItem("bloco", b.id);
   for (const m of media.data ?? []) await purgeItem("midia", m.id);
   for (const f of files.data ?? []) await purgeItem("arquivo", f.id);
-  return { blocos: blocks.data?.length ?? 0, midias: media.data?.length ?? 0, arquivos: files.data?.length ?? 0, eventos: events.data?.length ?? 0 };
+  return { blocos: blocks.data?.length ?? 0, midias: media.data?.length ?? 0, arquivos: files.data?.length ?? 0, eventos: events.data?.length ?? 0, tendencias: trends.data?.length ?? 0 };
 }
 
 let lastPurge = 0;
@@ -100,6 +112,11 @@ export function purgeSoon() {
 export async function restoreItem(kind: TrashKind, id: string, by: string) {
   if (kind === "bloco") {
     const { error } = await db().from("blocks").update({ deleted_at: null, deleted_by: null }).eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  if (kind === "tendencia") {
+    const { error } = await db().from("trend_items").update({ deleted_at: null, deleted_by: null }).eq("id", id);
     if (error) throw error;
     return;
   }
@@ -153,11 +170,12 @@ const daysLeft = (at: string) => Math.max(0, Math.ceil((Date.parse(at) + TRASH_D
 type Rel = { name: string; color: string; slug: string };
 
 export async function listTrash(): Promise<TrashEntry[]> {
-  const [blocks, media, files, events] = await Promise.all([
+  const [blocks, media, files, events, trends] = await Promise.all([
     db().from("blocks").select("id, title, format, date, deleted_at, deleted_by, clients(name, color, slug)").not("deleted_at", "is", null),
     db().from("block_media").select("id, kind, path, deleted_at, deleted_by, block_id, blocks(title, deleted_at, clients(name, color, slug))").not("deleted_at", "is", null),
     db().from("client_files").select("id, name, deleted_at, deleted_by, clients(name, color, slug)").not("deleted_at", "is", null),
     db().from("events").select("id, title, date, deleted_at, deleted_by, clients(name, color, slug)").not("deleted_at", "is", null),
+    db().from("trend_items").select("id, title, kind, week_of, deleted_at, deleted_by, clients(name, color, slug)").not("deleted_at", "is", null),
   ]);
   const out: TrashEntry[] = [];
   for (const b of (blocks.data ?? []) as unknown as { id: string; title: string; format: string; date: string; deleted_at: string; deleted_by: string | null; clients: Rel }[]) {
@@ -184,6 +202,13 @@ export async function listTrash(): Promise<TrashEntry[]> {
     out.push({
       kind: "evento", id: e.id, label: e.title, detail: `evento · ${e.date.split("-").reverse().join("/")}`,
       client: e.clients.name, clientColor: e.clients.color, clientSlug: e.clients.slug, deletedAt: e.deleted_at, deletedBy: e.deleted_by ?? "Straut", daysLeft: daysLeft(e.deleted_at),
+    });
+  }
+  const TK: Record<string, string> = { mercado: "tendência do mês", referencia: "referência", gravar: "ideia para gravar", stories: "stories" };
+  for (const t of (trends.data ?? []) as unknown as { id: string; title: string; kind: string; week_of: string; deleted_at: string; deleted_by: string | null; clients: Rel }[]) {
+    out.push({
+      kind: "tendencia", id: t.id, label: t.title || "Sem título", detail: `${TK[t.kind] ?? t.kind} · semana de ${t.week_of.split("-").reverse().slice(0, 2).join("/")}`,
+      client: t.clients.name, clientColor: t.clients.color, clientSlug: t.clients.slug, deletedAt: t.deleted_at, deletedBy: t.deleted_by ?? "Straut", daysLeft: daysLeft(t.deleted_at),
     });
   }
   return out.sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : -1));

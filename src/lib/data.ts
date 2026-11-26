@@ -4,6 +4,7 @@ import { hueOf } from "./meta";
 import { driveIdOf, drivePreviewUrl, isDrivePath } from "./drive";
 import { purgeSoon } from "./trash";
 import type { ClientMetrics } from "./metrics";
+import type { TrendItem, TrendsInfo } from "./types";
 import type { Block, CalendarEvent, ProductionItem, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -152,6 +153,42 @@ export async function loadMetrics(clientIds?: string[]): Promise<ClientMetrics[]
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Tendências
+// ---------------------------------------------------------------------------
+export const TREND_COLS = "id, client_id, week_of, kind, title, body, handle, link, stat, adapt, steps, position, created_by, published_at";
+
+export function mapTrends(rows: Row[]): TrendItem[] {
+  return rows.map((r) => ({
+    id: r.id, clientId: r.client_id, weekOf: r.week_of, kind: r.kind, title: r.title, body: r.body, handle: r.handle,
+    link: r.link, stat: r.stat, adapt: r.adapt, steps: Array.isArray(r.steps) ? r.steps.map(String) : [],
+    position: r.position, createdBy: r.created_by, published: !!r.published_at,
+  }));
+}
+
+/** Itens da aba Tendências. A cliente só vê o que foi liberado. */
+export async function loadTrends(clientId: string, role: Role): Promise<TrendItem[]> {
+  let q = db().from("trend_items").select(TREND_COLS).eq("client_id", clientId).is("deleted_at", null)
+    .order("week_of", { ascending: false }).order("position");
+  if (role === "cliente") q = q.not("published_at", "is", null);
+  const { data, error } = await q;
+  if (error) throw error;
+  return mapTrends(data ?? []);
+}
+
+/** Aviso do botão Tendências (novidade para a cliente; itens a revisar para a Straut). */
+export async function loadTrendsInfo(clientId: string, role: Role): Promise<TrendsInfo> {
+  const [{ data: pub }, { count }, { data: c }] = await Promise.all([
+    db().from("trend_items").select("published_at").eq("client_id", clientId).is("deleted_at", null)
+      .not("published_at", "is", null).order("published_at", { ascending: false }).limit(1),
+    role === "straut"
+      ? db().from("trend_items").select("id", { count: "exact", head: true }).eq("client_id", clientId).is("deleted_at", null).is("published_at", null)
+      : Promise.resolve({ count: 0 }),
+    db().from("clients").select("trends_seen_at").eq("id", clientId).single(),
+  ]);
+  return { clientId, lastPublished: pub?.[0]?.published_at ?? null, pending: count ?? 0, seenAt: c?.trends_seen_at ?? null };
+}
+
 /** Tudo (painel da Straut). */
 export async function loadAll() {
   purgeSoon(); // esvazia o que passou de 30 dias na lixeira
@@ -164,7 +201,7 @@ export async function loadAll() {
   if (e2) throw e2;
   if (e3) throw e3;
   const [c, b, m] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [], "straut"), loadMetrics()]);
-  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, loadedAt: Date.now() };
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, trends: [] as TrendsInfo[], loadedAt: Date.now() };
 }
 
 /** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
@@ -190,8 +227,8 @@ export async function loadClient(clientId: string, role: Role) {
   if (e1) throw e1;
   if (e2) throw e2;
   if (e3) throw e3;
-  const [c, b, m] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role), loadMetrics([clientId])]);
-  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, loadedAt: Date.now() };
+  const [c, b, m, t] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role), loadMetrics([clientId]), loadTrendsInfo(clientId, role)]);
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, trends: [t], loadedAt: Date.now() };
 }
 
 /** Dia de produção: o evento, as marcações dele e os roteiros já gravados em outros dias de produção. */

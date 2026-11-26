@@ -86,6 +86,15 @@ Rotina diária: a tarefa agendada `painel-metricas-mlabs` do app do Claude (no c
 dos 3 melhores posts do mês que ainda não têm motivo. A página principal mostra o resumo de todas as clientes
 (`src/components/MetricsOverview.tsx`).
 
+## Aba Tendências
+
+Página  (Straut: edita, libera, "Virar roteiro") e  (cliente: só lê o que foi
+liberado). Tabela : uma linha por item,  =  |  |  | ,
+agrupados por  (segunda-feira). A semana só aparece para a cliente com  preenchido (botão
+"Liberar para a cliente").  controla o aviso "nova" no botão da cliente. A rotina
+ (segunda às 10h, no computador do Guilherme) pesquisa e grava a semana como rascunho.
+Apagar manda para a Lixeira.
+
 ## Como rodar
 
 Requer Node.js 20 ou superior.

@@ -2,7 +2,7 @@
 
 import {
   ArrowLeft, ArrowRight, Camera, Check, Download, Eye, FileText, FolderOpen, Grid3x3, Image as ImageIcon, Link2, Loader2, Plus,
-  Power, Presentation, Settings2, Trash2, Upload, Video, X, File,
+  Power, Presentation, Settings2, Sparkles, Trash2, Upload, Video, X, File,
 } from "lucide-react";
 import FeedView from "@/components/FeedView";
 import ClientForm from "@/components/ClientForm";
@@ -119,6 +119,10 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
   };
 
   const base = isClient ? `/p/${client.slug}` : `/c/${client.slug}`;
+  const ti = store.trends.find((t) => t.clientId === client.id);
+  const trendsBadge = !ti ? null : isClient
+    ? (ti.lastPublished && (!ti.seenAt || ti.lastPublished > ti.seenAt) ? "nova" : null)
+    : (ti.pending > 0 ? `${ti.pending} a revisar` : null);
   const openEvent = (id: string) => router.push(`${base}/producao/${id}`);
   const addEvent = async (date: string) => {
     setAddDate(null);
@@ -130,38 +134,39 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
     <div className="min-h-dvh pb-24">
       {/* Topo */}
       <header className="border-b border-mist bg-paper">
-        <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-3 px-4 py-3.5 md:px-8">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-2 px-3 py-3.5 sm:gap-3 sm:px-4 md:px-8">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {!isClient && (
-              <Link href="/" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-graphite hover:bg-cream">
-                <ArrowLeft size={14} /> Painel
+              <Link href="/" aria-label="Painel" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-graphite hover:bg-cream">
+                <ArrowLeft size={14} /> <span className="hidden sm:inline">Painel</span>
               </Link>
             )}
-            <Logo className="h-4" />
+            <Logo className="h-4 shrink-0" />
             {store.busy && <Loader2 size={15} className="animate-spin text-muted" aria-label="Salvando" />}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             {!isClient && (
               <>
-                <Button variant="ghost" onClick={copyLink} className="text-xs">
+                <Button variant="ghost" onClick={copyLink} className="px-2.5! text-xs sm:px-3.5!">
                   {copied ? <Check size={14} /> : <Link2 size={14} />}
                   <span className="hidden sm:inline">{copied ? "Link copiado" : "Copiar link da cliente"}</span>
                 </Button>
                 <Link
                   href={`/p/${client.slug}`}
                   target="_blank"
-                  className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium text-graphite hover:bg-cream"
+                  className="hidden items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium text-graphite hover:bg-cream sm:inline-flex"
                   aria-label="Ver como a cliente"
                 >
                   <Eye size={14} /> <span className="hidden sm:inline">Ver como a cliente</span>
                 </Link>
-                <Button variant="ghost" onClick={() => setManageOpen(true)} className="text-xs" aria-label="Gestão da cliente">
+                <Button variant="ghost" onClick={() => setManageOpen(true)} className="px-2.5! text-xs sm:px-3.5!" aria-label="Gestão da cliente">
                   <Settings2 size={14} /> <span className="hidden sm:inline">Gestão</span>
                 </Button>
               </>
             )}
-            <Button variant="outline" onClick={() => setFilesOpen(true)} className="text-xs">
-              <FolderOpen size={14} /> Arquivos
+            <TrendsButton href={`${base}/tendencias`} badge={trendsBadge} />
+            <Button variant="outline" onClick={() => setFilesOpen(true)} className="px-2.5! text-xs sm:px-3.5!">
+              <FolderOpen size={14} /> <span className="hidden sm:inline">Arquivos</span>
             </Button>
           </div>
         </div>
@@ -332,6 +337,17 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
         />
       )}
     </div>
+  );
+}
+
+/** Botão da aba Tendências (cor de destaque). */
+function TrendsButton({ href, badge }: { href: string; badge: string | null }) {
+  return (
+    <Link href={href} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#b9583a] px-3 py-2 sm:px-3.5 text-xs font-medium text-paper shadow-[0_6px_16px_-8px_rgba(185,88,58,0.7)] transition hover:bg-[#a54c31]">
+      <Sparkles size={14} /> Tendências
+      {badge && <span className="hidden rounded-full bg-paper px-1.5 py-px text-[10px] font-semibold text-[#9a4429] sm:inline">{badge}</span>}
+      {badge && <span className="h-2 w-2 rounded-full bg-paper sm:hidden" aria-label={badge} />}
+    </Link>
   );
 }
 

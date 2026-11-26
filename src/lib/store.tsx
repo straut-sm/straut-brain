@@ -7,6 +7,7 @@ import type { Result } from "@/app/actions";
 import { hueOf } from "./meta";
 import { browserClient } from "./supabase/browser";
 import type { ClientMetrics } from "./metrics";
+import type { TrendsInfo } from "./types";
 import type { Block, CalendarEvent, Client, ClientInput, FileKind, Format, MediaKind, PostFormat, Role, Status } from "./types";
 
 interface Data {
@@ -15,6 +16,8 @@ interface Data {
   events: CalendarEvent[];
   /** Métricas do Instagram por cliente. */
   metrics: ClientMetrics[];
+  /** Aviso do botão Tendências (só na página da cliente). */
+  trends: TrendsInfo[];
   /** Momento em que o servidor gerou estes dados. */
   loadedAt: number;
 }

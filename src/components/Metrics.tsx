@@ -91,7 +91,7 @@ function Card({ label, value, sub, delta, series, hero = false }: {
   return (
     <div className="flex min-w-0 flex-col rounded-2xl border border-mist bg-paper p-4 md:p-5">
       <div className="mb-1 flex items-start justify-between gap-2">
-        <p className="text-xs text-muted">{label}</p>
+        <p className="min-w-0 truncate text-xs text-muted">{label}</p>
         <DeltaPill delta={delta} />
       </div>
       <p className={`font-display font-semibold leading-none tracking-tight tabular-nums ${hero ? "text-[38px] md:text-[44px]" : "text-[30px] md:text-[34px]"}`}>{value}</p>

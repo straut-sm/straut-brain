@@ -8,10 +8,10 @@ import { AccessError, clientCookieName, makeClientToken, requireAdmin, requireCl
 import { db } from "@/lib/supabase/admin";
 import { authClient } from "@/lib/supabase/server";
 import { FORMATS, PLANNED } from "@/lib/meta";
-import { EVENT_COLS, loadBlock, mapEvents } from "@/lib/data";
+import { EVENT_COLS, TREND_COLS, loadBlock, mapEvents, mapTrends } from "@/lib/data";
 import { driveFileId, drivePath } from "@/lib/drive";
-import { listTrash, purgeItem, restoreItem, trashBlock, trashEvent, trashFile, trashMedia, type TrashEntry, type TrashKind } from "@/lib/trash";
-import type { Block, CalendarEvent, ClientInput, ProductionState, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
+import { listTrash, purgeItem, restoreItem, trashBlock, trashEvent, trashFile, trashMedia, trashTrend, type TrashEntry, type TrashKind } from "@/lib/trash";
+import type { Block, CalendarEvent, ClientInput, ProductionState, TrendInput, TrendItem, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
 export type Result<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -512,7 +512,7 @@ export async function fileDownloadUrl(fileId: string): Promise<Result<string>> {
 // Lixeira (30 dias)
 // ---------------------------------------------------------------------------
 
-const TRASH_KINDS: TrashKind[] = ["bloco", "midia", "arquivo", "evento"];
+const TRASH_KINDS: TrashKind[] = ["bloco", "midia", "arquivo", "evento", "tendencia"];
 
 export async function getTrash(): Promise<Result<TrashEntry[]>> {
   return run(async () => {
@@ -674,6 +674,108 @@ export async function setPostReason(postId: string, reason: string): Promise<Res
     if (!UUID.test(postId)) throw new AccessError("Post inválido.");
     const { error } = await db().from("ig_posts").update({ reason: reason.trim().slice(0, 600), reason_by: "Straut", updated_at: new Date().toISOString() }).eq("id", postId);
     if (error) throw error;
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Aba Tendências
+// ---------------------------------------------------------------------------
+
+const TREND_KINDS = ["mercado", "referencia", "gravar", "stories"];
+const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+
+async function getTrend(id: string) {
+  if (!UUID.test(id)) throw new AccessError("Item inválido.");
+  const { data } = await db().from("trend_items").select(TREND_COLS).eq("id", id).is("deleted_at", null).maybeSingle();
+  if (!data) throw new AccessError("Item não encontrado.");
+  return data as any;
+}
+
+/** Cria (sem id) ou edita um item da aba Tendências. */
+export async function saveTrendItem(
+  id: string | null, clientId: string, weekOf: string, input: TrendInput,
+): Promise<Result<TrendItem>> {
+  return run(async () => {
+    await requireAdmin();
+    if (!TREND_KINDS.includes(input.kind)) throw new AccessError("Tipo inválido.");
+    const link = cut(input.link, 400);
+    if (link && !/^https?:\/\//i.test(link)) throw new AccessError("O link precisa começar com https://");
+    const clean = {
+      kind: input.kind, title: cut(input.title, 200), body: cut(input.body, 3000), handle: cut(input.handle, 80).replace(/^@?/, input.handle?.trim() ? "@" : ""),
+      link, stat: cut(input.stat, 80), adapt: cut(input.adapt, 1000),
+      steps: (input.steps ?? []).map((x) => cut(x, 400)).filter(Boolean).slice(0, 12), updated_at: new Date().toISOString(),
+    };
+    if (id) {
+      await getTrend(id);
+      const { data, error } = await db().from("trend_items").update(clean).eq("id", id).select(TREND_COLS).single();
+      if (error) throw error;
+      return mapTrends([data])[0];
+    }
+    if (!UUID.test(clientId) || !YMD.test(weekOf)) throw new AccessError("Dados inválidos.");
+    // Item novo entra no fim da seção e segue a liberação da semana
+    const { data: week } = await db().from("trend_items").select("position, published_at").eq("client_id", clientId)
+      .eq("week_of", weekOf).is("deleted_at", null);
+    const position = (week ?? []).reduce((m, w) => Math.max(m, w.position), -1) + 1;
+    const published = (week ?? []).find((w) => w.published_at)?.published_at ?? null;
+    const { data, error } = await db().from("trend_items")
+      .insert({ ...clean, client_id: clientId, week_of: weekOf, position, created_by: "Straut", published_at: published })
+      .select(TREND_COLS).single();
+    if (error) throw error;
+    return mapTrends([data])[0];
+  });
+}
+
+export async function deleteTrendItem(id: string): Promise<Result<boolean>> {
+  return run(async () => {
+    await requireAdmin();
+    await getTrend(id);
+    await trashTrend(id, "Straut");
+    return true;
+  });
+}
+
+/** Libera (ou recolhe) a semana para a cliente. */
+export async function publishTrendWeek(clientId: string, weekOf: string, publish: boolean): Promise<Result<boolean>> {
+  return run(async () => {
+    await requireAdmin();
+    if (!UUID.test(clientId) || !YMD.test(weekOf)) throw new AccessError("Dados inválidos.");
+    const { error } = await db().from("trend_items").update({ published_at: publish ? new Date().toISOString() : null })
+      .eq("client_id", clientId).eq("week_of", weekOf).is("deleted_at", null);
+    if (error) throw error;
+    return true;
+  });
+}
+
+/** Ideia da aba Tendências vira um roteiro no calendário (data de hoje; dá para arrastar depois). */
+export async function trendToScript(id: string, date: string): Promise<Result<string>> {
+  return run(async () => {
+    await requireAdmin();
+    const t = await getTrend(id);
+    if (!YMD.test(date)) throw new AccessError("Data inválida.");
+    const steps = (Array.isArray(t.steps) ? t.steps : []).map((x: string, i: number) => `${i + 1}. ${x}`);
+    const script = [t.body, t.adapt && `${t.kind === "referencia" ? "Como adaptar" : "Dica"}: ${t.adapt}`, steps.length && steps.join("\n"), t.link && `Referência: ${t.link}`]
+      .filter(Boolean).join("\n\n");
+    const blockId = crypto.randomUUID();
+    const { error } = await db().from("blocks").insert({
+      id: blockId, client_id: t.client_id, date, title: t.title || "Ideia da aba Tendências", script,
+      planned_format: t.kind === "stories" ? null : "reels",
+    });
+    if (error) throw error;
+    await log(blockId, "Straut", "Bloco criado como Roteiro a partir da aba Tendências");
+    return blockId;
+  });
+}
+
+/** A cliente abriu a aba: some o aviso "nova". */
+export async function markTrendsSeen(clientId: string): Promise<Result<boolean>> {
+  return run(async () => {
+    if (!UUID.test(clientId)) throw new AccessError("Cliente inválida.");
+    const who = await requireClientAccess(clientId);
+    if (who === "Cliente") {
+      const { error } = await db().from("clients").update({ trends_seen_at: new Date().toISOString() }).eq("id", clientId);
+      if (error) throw error;
+    }
     return true;
   });
 }

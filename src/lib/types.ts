@@ -153,3 +153,37 @@ export interface ProductionItem {
   position: number;
   state: ProductionState;
 }
+
+/** Aba Tendências */
+export type TrendKind = "mercado" | "referencia" | "gravar" | "stories";
+
+export interface TrendItem {
+  id: string;
+  clientId: string;
+  weekOf: string; // segunda-feira (YYYY-MM-DD)
+  kind: TrendKind;
+  title: string;
+  body: string;
+  handle: string;
+  link: string;
+  stat: string;
+  adapt: string;
+  steps: string[];
+  position: number;
+  createdBy: string;
+  /** Liberado para a cliente. */
+  published: boolean;
+}
+
+/** Aviso do botão Tendências. */
+export interface TrendsInfo {
+  clientId: string;
+  /** Última liberação para a cliente. */
+  lastPublished: string | null;
+  /** Itens ainda não liberados (só a Straut vê). */
+  pending: number;
+  /** Última vez que a cliente abriu a aba. */
+  seenAt: string | null;
+}
+
+export type TrendInput = Pick<TrendItem, "kind" | "title" | "body" | "handle" | "link" | "stat" | "adapt" | "steps">;
