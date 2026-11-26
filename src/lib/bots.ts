@@ -36,9 +36,11 @@ const sha = (s: string) => createHash("sha256").update(s).digest();
 
 /** Confere a chave em tempo constante. Sem BOTS_API_KEY configurada, a API fica fechada. */
 export function checkKey(header: string | null) {
-  const key = process.env.BOTS_API_KEY ?? "";
+  // Tolera espaços, quebras de linha e aspas que vêm junto ao copiar e colar a chave
+  const clean = (s: string) => s.trim().replace(/^["']|["']$/g, "").trim();
+  const key = clean(process.env.BOTS_API_KEY ?? "");
   if (key.length < 32) throw new ApiError(503, "API dos bots desativada (BOTS_API_KEY não configurada).");
-  const got = header?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
+  const got = clean((header ?? "").replace(/^Bearer\s+/i, ""));
   if (!got || !timingSafeEqual(sha(got), sha(key))) throw new ApiError(401, "Chave inválida.");
 }
 
