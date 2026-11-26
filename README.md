@@ -80,6 +80,12 @@ sem essa data aparece desfocada, com "Aguardando sincronização". O cálculo é
   escrito pelo Claude (`reason_by = 'Claude'`) e pode ser editado pela Straut na página da cliente.
 - Post ↔ bloco: pelo link colado no bloco (`blocks.instagram_url`); sem link, pela mesma data e formato.
 
+Rotina diária: a tarefa agendada `painel-metricas-mlabs` do app do Claude (no computador do Guilherme, seg a sex
+às 9h; se o computador estiver desligado, roda quando ele ligar) busca os últimos 45 dias no mLabs e grava com
+`node --env-file=.env.local scripts/sync-metrics.mjs <slug> <mlabs_profile_id> <arquivos>`. Depois escreve o motivo
+dos 3 melhores posts do mês que ainda não têm motivo. A página principal mostra o resumo de todas as clientes
+(`src/components/MetricsOverview.tsx`).
+
 ## Como rodar
 
 Requer Node.js 20 ou superior.

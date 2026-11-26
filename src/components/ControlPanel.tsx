@@ -14,6 +14,7 @@ import { FORMATS } from "@/lib/meta";
 import { MONTHS, formatShort, inMonth } from "@/lib/dates";
 import Calendar, { StatusLegend } from "@/components/Calendar";
 import BlockModal from "@/components/BlockModal";
+import MetricsOverview from "@/components/MetricsOverview";
 import ClientForm from "@/components/ClientForm";
 import { ProgressBar, ProgressLegend } from "@/components/Progress";
 import { Logo, SectionTitle } from "@/components/ui";
@@ -188,6 +189,8 @@ export default function ControlPage() {
             </div>
           )}
         </section>
+
+        <MetricsOverview clients={active} metrics={store.metrics} />
 
         <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Calendário geral */}

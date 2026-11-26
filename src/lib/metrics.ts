@@ -92,6 +92,8 @@ export interface Summary {
   /** Média de alcance dos últimos 90 dias (régua da estrela). */
   baseline: number | null;
   starred: Set<string>; // ids de posts
+  /** Posts do mês atual com estrela. */
+  starredThisMonth: number;
   top: IgPost[];
   series: { reach: number[]; followers: number[]; saves: number[]; shares: number[] };
 }
@@ -142,7 +144,7 @@ export function summarize(m: ClientMetrics, today: string): Summary {
     followersGainPrev: prevAtTo !== null && prevBase !== null ? prevAtTo - prevBase : null,
     saves, savesDelta: prev.length ? pct(saves, sum(prev.map((p) => p.saves))) : null,
     shares, sharesDelta: prev.length ? pct(shares, sum(prev.map((p) => p.shares))) : null,
-    baseline, starred,
+    baseline, starred, starredThisMonth: cur.filter((p) => starred.has(p.id)).length,
     top: [...cur].sort((a, b) => score(b) - score(a)).slice(0, 3),
     series: {
       reach: last30.map((p) => p.reach),
