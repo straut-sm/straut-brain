@@ -29,7 +29,7 @@ async function run<T>(fn: () => Promise<T>): Promise<Result<T>> {
 async function getBlock(id: string) {
   const { data, error } = await db()
     .from("blocks")
-    .select("id, client_id, date, title, format, planned_format, status, caption, script, suggestion")
+    .select("id, client_id, date, title, format, planned_format, status, caption, script, suggestion, instagram_url")
     .eq("id", id)
     .is("deleted_at", null)
     .single();
@@ -642,5 +642,38 @@ export async function setProductionState(eventId: string, blockId: string, state
     );
     if (error) throw error;
     return null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Métricas do Instagram
+// ---------------------------------------------------------------------------
+
+/** Link do post publicado no Instagram (vazio = tirar). Liga o bloco às métricas. */
+export async function setInstagramUrl(id: string, url: string): BlockResult {
+  return run(async () => {
+    const [, b] = await Promise.all([requireAdmin(), getBlock(id)]);
+    const clean = url.trim().slice(0, 300);
+    if (clean && !/^https:\/\/(www\.)?instagram\.com\/(?:[\w.]+\/)?(p|reel|reels|tv)\/[\w-]+/i.test(clean)) {
+      throw new AccessError("Cole o link do post no Instagram (instagram.com/p/... ou /reel/...).");
+    }
+    if ((b.instagram_url ?? "") !== clean) {
+      await Promise.all([
+        update("blocks", id, { instagram_url: clean }),
+        log(id, "Straut", clean ? "Ligou o bloco ao post do Instagram" : "Tirou o link do Instagram"),
+      ]);
+    }
+    return loadBlock(id);
+  });
+}
+
+/** "Por que foi bem" de um post do top 3 (o Claude preenche; a Straut pode ajustar). */
+export async function setPostReason(postId: string, reason: string): Promise<Result<boolean>> {
+  return run(async () => {
+    await requireAdmin();
+    if (!UUID.test(postId)) throw new AccessError("Post inválido.");
+    const { error } = await db().from("ig_posts").update({ reason: reason.trim().slice(0, 600), reason_by: "Straut", updated_at: new Date().toISOString() }).eq("id", postId);
+    if (error) throw error;
+    return true;
   });
 }

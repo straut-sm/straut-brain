@@ -67,6 +67,19 @@ A página lista os roteiros da cliente ainda não gravados em outro dia de produ
 (`production_items.state`: `pendente`, `gravado`, `oculto`) são só visuais: não mudam a data nem o status do bloco.
 Apagar o evento manda para a Lixeira. Código em `src/components/ProductionView.tsx`.
 
+## Métricas do Instagram
+
+Os números vêm do mLabs. A rotina do Claude grava em `ig_posts` (um post por linha, com alcance, salvamentos,
+compartilhamentos etc.) e `ig_followers` (seguidores por dia), e marca `clients.metrics_synced_at`. Cliente
+sem essa data aparece desfocada, com "Aguardando sincronização". O cálculo é feito no navegador
+(`src/lib/metrics.ts`):
+
+- Mês atual (dia 1 até hoje) contra os mesmos dias do mês anterior. Menos de 5% de diferença = estável.
+- Estrela no calendário: alcance acima da média da cliente nos últimos 90 dias (mínimo de 3 posts).
+- Top 3 do mês: maior soma de alcance + salvamentos + compartilhamentos. O motivo (`ig_posts.reason`) é
+  escrito pelo Claude (`reason_by = 'Claude'`) e pode ser editado pela Straut na página da cliente.
+- Post ↔ bloco: pelo link colado no bloco (`blocks.instagram_url`); sem link, pela mesma data e formato.
+
 ## Como rodar
 
 Requer Node.js 20 ou superior.

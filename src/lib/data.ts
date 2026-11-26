@@ -3,6 +3,7 @@ import { db } from "./supabase/admin";
 import { hueOf } from "./meta";
 import { driveIdOf, drivePreviewUrl, isDrivePath } from "./drive";
 import { purgeSoon } from "./trash";
+import type { ClientMetrics } from "./metrics";
 import type { Block, CalendarEvent, ProductionItem, Client, ClientFile, Comment, HistoryEntry, MediaItem, Role, Snapshot, Suggestion } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ type Row = Record<string, any>;
 const CLIENT_COLS =
   "id, slug, name, specialty, color, contract_posts, payment_day, drive_url, instagram_url, tiktok_url, active, notes, avatar_path, client_files(id, name, kind, size_bytes, created_at, deleted_at)";
 export const BLOCK_COLS =
-  "id, client_id, date, title, format, planned_format, status, caption, script, suggestion, block_media(id, kind, path, position, deleted_at), block_history(id, at, author, action, before, bot), block_comments(id, at, author, text, seen, bot, internal)";
+  "id, client_id, date, title, format, planned_format, status, caption, script, suggestion, instagram_url, block_media(id, kind, path, position, deleted_at), block_history(id, at, author, action, before, bot), block_comments(id, at, author, text, seen, bot, internal)";
 
 async function mapClients(rows: Row[], role: Role): Promise<Client[]> {
   const avatars = await signMany("midia", rows.map((r) => r.avatar_path).filter(Boolean));
@@ -90,6 +91,7 @@ export async function mapBlocks(rows: Row[], viewer: Role = "straut"): Promise<B
     script: r.script,
     suggestion: (r.suggestion as Suggestion | null) ?? undefined,
     hue: hueOf(r.id),
+    instagramUrl: r.instagram_url ?? "",
     media: ((r.block_media ?? []) as Row[])
       .filter((m) => !m.deleted_at)
       .sort((a, b) => a.position - b.position)
@@ -118,6 +120,38 @@ export function mapEvents(rows: Row[]): CalendarEvent[] {
   return rows.map((r) => ({ id: r.id, clientId: r.client_id, date: r.date, kind: r.kind, title: r.title, notes: r.notes ?? "" }));
 }
 
+// ---------------------------------------------------------------------------
+// Métricas do Instagram (gravadas pela rotina do mLabs)
+// ---------------------------------------------------------------------------
+const POST_COLS = "id, client_id, date, format, permalink, caption, thumbnail_url, reach, views, likes, comments, saves, shares, reason, reason_by";
+
+/** Posts dos últimos ~5 meses e seguidores dos últimos ~70 dias. Sem clientIds = todas. */
+export async function loadMetrics(clientIds?: string[]): Promise<ClientMetrics[]> {
+  const since = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  let qc = db().from("clients").select("id, metrics_synced_at");
+  let qp = db().from("ig_posts").select(POST_COLS).gte("date", since(150)).order("date");
+  let qf = db().from("ig_followers").select("client_id, date, followers").gte("date", since(70)).order("date");
+  if (clientIds) {
+    qc = qc.in("id", clientIds);
+    qp = qp.in("client_id", clientIds);
+    qf = qf.in("client_id", clientIds);
+  }
+  const [{ data: cs, error: e1 }, { data: ps, error: e2 }, { data: fs, error: e3 }] = await Promise.all([qc, qp, qf]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+  if (e3) throw e3;
+  return (cs ?? []).map((c) => ({
+    clientId: c.id,
+    syncedAt: c.metrics_synced_at ?? null,
+    posts: (ps ?? []).filter((p) => p.client_id === c.id).map((p) => ({
+      id: p.id, date: p.date, format: p.format, permalink: p.permalink, caption: p.caption, thumbnailUrl: p.thumbnail_url,
+      reach: p.reach, views: p.views, likes: p.likes, comments: p.comments, saves: p.saves, shares: p.shares,
+      reason: p.reason, ...(p.reason_by ? { reasonBy: p.reason_by } : {}),
+    })),
+    followers: (fs ?? []).filter((x) => x.client_id === c.id).map((x) => ({ date: x.date, followers: x.followers })),
+  }));
+}
+
 /** Tudo (painel da Straut). */
 export async function loadAll() {
   purgeSoon(); // esvazia o que passou de 30 dias na lixeira
@@ -129,8 +163,8 @@ export async function loadAll() {
   if (e1) throw e1;
   if (e2) throw e2;
   if (e3) throw e3;
-  const [c, b] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [], "straut")]);
-  return { clients: c, blocks: b, events: mapEvents(events ?? []), loadedAt: Date.now() };
+  const [c, b, m] = await Promise.all([mapClients(clients ?? [], "straut"), mapBlocks(blocks ?? [], "straut"), loadMetrics()]);
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, loadedAt: Date.now() };
 }
 
 /** Um bloco completo (as ações devolvem para atualizar a tela sem recarregar tudo). */
@@ -156,8 +190,8 @@ export async function loadClient(clientId: string, role: Role) {
   if (e1) throw e1;
   if (e2) throw e2;
   if (e3) throw e3;
-  const [c, b] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role)]);
-  return { clients: c, blocks: b, events: mapEvents(events ?? []), loadedAt: Date.now() };
+  const [c, b, m] = await Promise.all([mapClients([client], role), mapBlocks(blocks ?? [], role), loadMetrics([clientId])]);
+  return { clients: c, blocks: b, events: mapEvents(events ?? []), metrics: m, loadedAt: Date.now() };
 }
 
 /** Dia de produção: o evento, as marcações dele e os roteiros já gravados em outros dias de produção. */

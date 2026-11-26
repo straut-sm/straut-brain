@@ -111,6 +111,8 @@ export interface Block {
   media: MediaItem[];
   /** Variação de cor do espaço reservado quando ainda não há mídia. */
   hue: number;
+  /** Link do post publicado no Instagram (liga o bloco às métricas). */
+  instagramUrl: string;
   history: HistoryEntry[];
   suggestion?: Suggestion;
   comments: Comment[];

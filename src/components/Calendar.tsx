@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Plus, Star } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { Block, CalendarEvent, Client } from "@/lib/types";
 import { FORMATS, STATUSES, statusLabel } from "@/lib/meta";
@@ -17,6 +17,8 @@ export type CalendarProps = {
   /** Quando existe, os blocos podem ser arrastados para outro dia (só no desktop). */
   onMove?: (id: string, date: string) => void;
   clientsById?: (id: string) => Client | undefined;
+  /** Blocos com estrela (post com alcance acima da média). */
+  starred?: Set<string>;
   /** Eventos (dia de produção). Aparecem no topo do dia. */
   events?: CalendarEvent[];
   onOpenEvent?: (id: string) => void;
@@ -81,8 +83,8 @@ export default function Calendar(props: CalendarProps) {
   );
 }
 
-function Chip({ block, client, dim, onOpen, showNews, draggable = false, dragging = false, onDragStart, onDragEnd }: {
-  block: Block; client?: Client; dim: boolean; onOpen: () => void; showNews?: boolean;
+function Chip({ block, client, dim, onOpen, showNews, star = false, draggable = false, dragging = false, onDragStart, onDragEnd }: {
+  block: Block; client?: Client; dim: boolean; onOpen: () => void; showNews?: boolean; star?: boolean;
   draggable?: boolean; dragging?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
 }) {
   const F = FORMATS[block.format];
@@ -115,7 +117,8 @@ function Chip({ block, client, dim, onOpen, showNews, draggable = false, draggin
       <span className="mt-1 flex items-center gap-1.5 text-[10.5px] text-muted">
         <StatusDot status={block.status} size={6} />
         <span className="truncate">{statusLabel(block.status, block.format)}</span>
-        {hasNews && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#b9583a]" title="Novidade da cliente" />}
+        {star && <Star size={11} className="ml-auto shrink-0 fill-[#e0b04a] text-[#e0b04a]" aria-label="Alcance acima da média" />}
+        {hasNews && <span className={`${star ? "" : "ml-auto "}h-1.5 w-1.5 shrink-0 rounded-full bg-[#b9583a]`} title="Novidade da cliente" />}
       </span>
     </button>
   );
@@ -153,7 +156,7 @@ function EventChip({ event, client, onOpen, draggable = false, dragging = false,
 }
 
 function DesktopGrid({
-  year, month, monthBlocks, monthEvents, onOpen, onAdd, onMove, onOpenEvent, onMoveEvent, clientsById, focusPending, showNews,
+  year, month, monthBlocks, monthEvents, onOpen, onAdd, onMove, onOpenEvent, onMoveEvent, clientsById, focusPending, showNews, starred,
 }: CalendarProps & { monthBlocks: Block[]; monthEvents: CalendarEvent[] }) {
   const weeks = monthWeeks(year, month);
   const today = todayYmd();
@@ -250,6 +253,7 @@ function DesktopGrid({
                       client={clientsById?.(b.clientId)}
                       dim={!!focusPending && !isPending(b)}
                       showNews={showNews}
+                      star={!!starred?.has(b.id)}
                       onOpen={() => onOpen(b.id)}
                       draggable={!!onMove}
                       dragging={dragId === `b:${b.id}`}
@@ -268,7 +272,7 @@ function DesktopGrid({
 }
 
 function MobileView({
-  year, month, monthBlocks, monthEvents, onOpen, onAdd, onOpenEvent, clientsById, focusPending,
+  year, month, monthBlocks, monthEvents, onOpen, onAdd, onOpenEvent, clientsById, focusPending, starred,
 }: CalendarProps & { monthBlocks: Block[]; monthEvents: CalendarEvent[] }) {
   const [onlyPending, setOnlyPending] = useState(!!focusPending);
   const [selected, setSelected] = useState<string | null>(null);
@@ -408,6 +412,7 @@ function MobileView({
                       <span className="block truncate text-sm text-ink">{b.title}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
                         <StatusDot status={b.status} size={6} /> {statusLabel(b.status, b.format)} · {FORMATS[b.format].label}
+                        {starred?.has(b.id) && <Star size={12} className="ml-1 fill-[#e0b04a] text-[#e0b04a]" aria-label="Alcance acima da média" />}
                       </span>
                     </span>
                     <ChevronRight size={16} className="shrink-0 text-muted" />

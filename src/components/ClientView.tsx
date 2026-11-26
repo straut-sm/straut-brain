@@ -15,6 +15,8 @@ import { MONTHS, formatLong, formatShort, inMonth, todayYmd } from "@/lib/dates"
 import { FORMATS, PLANNED, PLANNED_ORDER, statusLabel } from "@/lib/meta";
 import Calendar, { StatusLegend } from "@/components/Calendar";
 import BlockModal from "@/components/BlockModal";
+import MetricsSection from "@/components/Metrics";
+import { starredBlocks } from "@/lib/metrics";
 import { Button, Logo, SectionTitle, StatusDot } from "@/components/ui";
 
 /** Página da cliente. mode "straut" = edição (/c/[slug]); "cliente" = link compartilhado (/p/[slug]). */
@@ -64,6 +66,8 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
 
   const blocks = useMemo(() => store.blocks.filter((b) => b.clientId === client?.id), [store.blocks, client]);
   const events = useMemo(() => store.events.filter((e) => e.clientId === client?.id), [store.events, client]);
+  const metrics = client ? store.metricsOf(client.id) : undefined;
+  const starred = useMemo(() => starredBlocks(metrics, blocks, todayYmd()), [metrics, blocks]);
   const pending = blocks.filter((b) => b.status === "aguardando_aprovacao");
   const suggestions = blocks.filter((b) => b.status === "ajuste_sugerido");
   const scripts = blocks
@@ -208,6 +212,8 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
           )}
         </div>
 
+        <MetricsSection metrics={metrics} blocks={blocks} canEdit={!isClient} onOpen={(id) => setOpen(id)} />
+
         {/* Roteiros para a próxima gravação */}
         {scripts.length > 0 && (
           <section className="mb-9">
@@ -287,6 +293,7 @@ export default function ClientView({ slug, mode }: { slug: string; mode: "straut
             onOpenEvent={openEvent}
             onMoveEvent={isClient ? undefined : (id, date) => store.updateEvent(id, { date })}
             focusPending={focusPending}
+            starred={starred}
             showNews={!isClient}
             headerExtra={
               <span className="text-xs text-muted">

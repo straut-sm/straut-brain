@@ -13,6 +13,8 @@ import { formatDateTime, formatLong } from "@/lib/dates";
 import { wordDiff } from "@/lib/diff";
 import { Button, FormatBadge, StatusDot, StatusPill } from "./ui";
 import Media from "./Media";
+import { fmtInt, matchPosts } from "@/lib/metrics";
+import { Instagram } from "lucide-react";
 
 export type ModalMode = "straut" | "cliente" | "visualizacao";
 
@@ -173,6 +175,8 @@ export default function BlockModal({
 
       {block.format === "roteiro" ? (block.caption || editing === "straut") && field("caption", "Legenda") : field("caption", "Legenda")}
 
+      {block.format !== "roteiro" && !editing && <PostLink block={block} canEdit={mode === "straut"} />}
+
       {mode !== "visualizacao" && !editing && <Comments block={block} mode={mode} />}
 
       {(mode === "visualizacao" || (mode === "straut" && showClient)) && client && !editing && (
@@ -311,6 +315,60 @@ export default function BlockModal({
         )}
       </div>
       </div>
+    </div>
+  );
+}
+
+/** Link do post no Instagram + números do post (quando já está ligado às métricas). */
+function PostLink({ block, canEdit }: { block: Block; canEdit: boolean }) {
+  const store = useStore();
+  const [draft, setDraft] = useState(block.instagramUrl);
+  const metrics = store.metricsOf(block.clientId);
+  const post = useMemo(() => {
+    if (!metrics) return undefined;
+    const blocks = store.blocks.filter((b) => b.clientId === block.clientId);
+    const match = matchPosts(metrics.posts, blocks);
+    const id = [...match.entries()].find(([, b]) => b === block.id)?.[0];
+    return metrics.posts.find((p) => p.id === id);
+  }, [metrics, store.blocks, block.clientId, block.id]);
+  const url = block.instagramUrl || post?.permalink || "";
+  if (!canEdit && !url && !post) return null;
+
+  return (
+    <div className="rounded-xl border border-mist bg-cream/50 p-3">
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+        <Instagram size={12} /> Post no Instagram
+      </p>
+      {post && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums">
+          <span><b className="font-semibold">{fmtInt(post.reach)}</b> <span className="text-xs text-muted">alcance</span></span>
+          <span><b className="font-semibold">{fmtInt(post.saves)}</b> <span className="text-xs text-muted">salvamentos</span></span>
+          <span><b className="font-semibold">{fmtInt(post.shares)}</b> <span className="text-xs text-muted">compartilhamentos</span></span>
+          <span><b className="font-semibold">{fmtInt(post.likes)}</b> <span className="text-xs text-muted">curtidas</span></span>
+        </div>
+      )}
+      {canEdit ? (
+        <>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => draft.trim() !== block.instagramUrl && store.setInstagramUrl(block.id, draft)}
+            placeholder="Cole o link do post (instagram.com/p/...)"
+            className="w-full rounded-lg border border-mist bg-paper px-2.5 py-1.5 text-xs focus:border-sand focus:outline-none"
+          />
+          <p className="mt-1 text-[11px] text-muted">
+            {block.instagramUrl
+              ? "Ligado pelo link."
+              : post ? "Ligado automaticamente pela data e pelo formato. Cole o link se estiver errado." : "Sem link, o post é ligado pela data e pelo formato."}
+          </p>
+        </>
+      ) : (
+        url && (
+          <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-graphite hover:text-ink">
+            Ver no Instagram <ExternalLink size={12} />
+          </a>
+        )
+      )}
     </div>
   );
 }

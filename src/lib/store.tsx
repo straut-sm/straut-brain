@@ -6,12 +6,15 @@ import * as A from "@/app/actions";
 import type { Result } from "@/app/actions";
 import { hueOf } from "./meta";
 import { browserClient } from "./supabase/browser";
+import type { ClientMetrics } from "./metrics";
 import type { Block, CalendarEvent, Client, ClientInput, FileKind, Format, MediaKind, PostFormat, Role, Status } from "./types";
 
 interface Data {
   clients: Client[];
   blocks: Block[];
   events: CalendarEvent[];
+  /** Métricas do Instagram por cliente. */
+  metrics: ClientMetrics[];
   /** Momento em que o servidor gerou estes dados. */
   loadedAt: number;
 }
@@ -38,6 +41,9 @@ interface Store extends Data {
   createEvent: (clientId: string, date: string) => Promise<string | null>;
   updateEvent: (id: string, patch: Partial<Pick<CalendarEvent, "date" | "title" | "notes">>) => Promise<void>;
   deleteEvent: (id: string) => Promise<boolean>;
+  metricsOf: (clientId: string) => ClientMetrics | undefined;
+  setInstagramUrl: (id: string, url: string) => Promise<void>;
+  setPostReason: (clientId: string, postId: string, reason: string) => Promise<void>;
   saveClient: (id: string | null, input: ClientInput) => Promise<{ id: string; slug: string } | null>;
   setActive: (id: string, active: boolean) => Promise<void>;
   setAvatar: (clientId: string, image: Blob | null) => Promise<void>;
@@ -186,11 +192,23 @@ export function StoreProvider({ initial, role, children }: { initial: Data; role
       const id = crypto.randomUUID();
       const draft: Block = {
         id, clientId, date, title: "Novo conteúdo", format: "roteiro", status: "em_producao",
-        caption: "", script: "", media: [], hue: hueOf(id), history: [], comments: [],
+        caption: "", script: "", media: [], hue: hueOf(id), instagramUrl: "", history: [], comments: [],
       };
       setData((d) => ({ ...d, blocks: [...d.blocks, draft] }));
       void blockOp(id, null, () => A.createBlock(id, clientId, date));
       return id; // abre o pop-up na hora
+    },
+    metricsOf: (clientId) => data.metrics.find((m) => m.clientId === clientId),
+    setInstagramUrl: (id, url) => blockOp(id, (b) => ({ ...b, instagramUrl: url.trim() }), () => A.setInstagramUrl(id, url)),
+    setPostReason: async (clientId, postId, reason) => {
+      setData((d) => ({
+        ...d,
+        metrics: d.metrics.map((m) => m.clientId !== clientId ? m : {
+          ...m, posts: m.posts.map((p) => (p.id === postId ? { ...p, reason: reason.trim(), reasonBy: "Straut" } : p)),
+        }),
+      }));
+      const ok = await call(() => A.setPostReason(postId, reason), false);
+      if (ok === null) refresh();
     },
     updateBlock: (id, patch) => blockOp(id, (b) => ({ ...b, ...patch }), () => A.updateBlock(id, patch)),
     changeFormat: (id, format) => blockOp(
