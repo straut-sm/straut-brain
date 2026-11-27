@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowUpRight, Bell, Check, ChevronDown, ImageOff, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2, Trash2,
+  ArrowUpRight, Bell, Check, ImageOff, Link2, Loader2, LogOut, MessageCircle, Pencil, Plus, Settings2, Trash2,
 } from "lucide-react";
 import TrashDrawer from "@/components/TrashDrawer";
 import { signOut } from "@/app/actions";
@@ -32,7 +32,6 @@ export default function ControlPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [form, setForm] = useState<null | "new" | string>(null);
-  const [showInactive, setShowInactive] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
 
   const active = store.clients.filter((c) => c.active);
@@ -183,25 +182,6 @@ export default function ControlPage() {
             )}
           </div>
 
-          {inactive.length > 0 && (
-            <div className="mt-3">
-              <button onClick={() => setShowInactive(!showInactive)} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink" aria-expanded={showInactive}>
-                Páginas desativadas ({inactive.length}) <ChevronDown size={13} className={`transition ${showInactive ? "rotate-180" : ""}`} />
-              </button>
-              {showInactive && (
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {inactive.map((c) => (
-                    <li key={c.id}>
-                      <button onClick={() => setForm(c.id)} className="inline-flex items-center gap-2 rounded-xl border border-mist bg-paper px-3 py-2 text-xs text-muted hover:border-sand hover:text-ink">
-                        <span className="h-2 w-2 rounded-full bg-sand" /> {c.name} · {c.specialty}
-                        <Settings2 size={13} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
         </section>
 
         <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -317,7 +297,13 @@ export default function ControlPage() {
       </main>
 
       {open && <BlockModal key={open} blockId={open} mode="straut" showClient onClose={() => setOpen(null)} />}
-      {trashOpen && <TrashDrawer onClose={() => setTrashOpen(false)} />}
+      {trashOpen && (
+        <TrashDrawer
+          onClose={() => setTrashOpen(false)}
+          inactive={inactive}
+          onManageClient={(id) => { setTrashOpen(false); setForm(id); }}
+        />
+      )}
       {form === "new" && <ClientForm onClose={() => setForm(null)} />}
       {editing && <ClientForm key={editing.id} client={editing} onClose={() => setForm(null)} />}
     </div>

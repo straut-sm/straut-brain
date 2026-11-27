@@ -1,16 +1,22 @@
 "use client";
 
-import { CalendarDays, Sparkles, FileText, Image as ImageIcon, LayoutGrid, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { CalendarDays, Sparkles, FileText, Image as ImageIcon, LayoutGrid, Loader2, RotateCcw, Settings2, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getTrash, purgeFromTrash, restoreFromTrash } from "@/app/actions";
 import type { TrashEntry } from "@/lib/trash";
 import { formatDateTime } from "@/lib/dates";
+import type { Client } from "@/lib/types";
 
 const ICON = { bloco: LayoutGrid, midia: ImageIcon, arquivo: FileText, evento: CalendarDays, tendencia: Sparkles } as const;
 
-/** Lixeira do painel: o que foi apagado fica 30 dias, pode ser restaurado ou apagado de vez. */
-export default function TrashDrawer({ onClose }: { onClose: () => void }) {
+/**
+ * Lixeira do painel: o que foi apagado fica 30 dias, pode ser restaurado ou apagado de vez.
+ * No fim ficam as páginas desativadas (não somem; reativar pela Gestão da cliente).
+ */
+export default function TrashDrawer({ onClose, inactive = [], onManageClient }: {
+  onClose: () => void; inactive?: Client[]; onManageClient?: (id: string) => void;
+}) {
   const router = useRouter();
   const [items, setItems] = useState<TrashEntry[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -52,7 +58,7 @@ export default function TrashDrawer({ onClose }: { onClose: () => void }) {
         <div className="thin-scroll flex-1 overflow-y-auto p-5">
           {error && <p className="rounded-xl bg-cream p-3 text-sm text-[#b9583a]">{error}</p>}
           {!items && !error && <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> Carregando…</p>}
-          {items?.length === 0 && (
+          {items?.length === 0 && !inactive.length && (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted">
               <Trash2 size={28} className="text-sand" />
               A lixeira está vazia.
@@ -100,6 +106,29 @@ export default function TrashDrawer({ onClose }: { onClose: () => void }) {
               );
             })}
           </ul>
+          {inactive.length > 0 && (
+            <section className={items?.length ? "mt-8" : ""}>
+              <h3 className="text-xs font-medium uppercase tracking-[0.14em] text-muted">Páginas desativadas <span className="font-normal">({inactive.length})</span></h3>
+              <p className="mb-3 mt-1 text-xs text-muted">Ficam guardadas sem prazo. Para reativar, abra a Gestão da cliente.</p>
+              <ul className="flex flex-col gap-2">
+                {inactive.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      onClick={() => onManageClient?.(c.id)}
+                      className="flex w-full items-center gap-3 rounded-2xl border border-mist p-3 text-left hover:border-sand hover:bg-cream/50"
+                    >
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-ink">{c.name}</span>
+                        <span className="block truncate text-xs text-muted">{c.specialty}</span>
+                      </span>
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs text-graphite"><Settings2 size={13} /> Gestão</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       </aside>
     </div>
