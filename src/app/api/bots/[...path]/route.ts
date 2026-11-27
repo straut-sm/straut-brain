@@ -3,6 +3,9 @@ import {
   ApiError, UUID, acceptSuggestionApi, advanceApi, attachMediaApi, checkBot, checkKey, checkRate, clientBlocks,
   clientSummary, commentApi, createBlockApi, deleteBlockApi, deleteMediaApi, getBlockApi, listClients, logRequest,
   pendencies, publishApi, reorderApi, searchBlocks, sendForApprovalApi, updateBlockApi, uploadUrls,
+  clientMetrics, clientProductionDays, createProductionDayApi, getProductionDay, updateProductionDayApi, deleteProductionDayApi,
+  setProductionOrderApi, setProductionStateApi, clientTrends, createTrendApi, getTrendApi, updateTrendApi, deleteTrendApi,
+  trendToScriptApi,
 } from "@/lib/bots";
 
 /*
@@ -37,6 +40,26 @@ const routes: { method: string; pattern: string[]; run: Handler; status?: number
   // Apagar = lixeira (30 dias, restaurável pelo painel)
   { method: "DELETE", pattern: ["blocos", ":id"], run: ({ seg, bot }) => deleteBlockApi(seg[1], bot) },
   { method: "DELETE", pattern: ["blocos", ":id", "midias", ":midia"], run: ({ seg, bot }) => deleteMediaApi(seg[1], seg[3], bot) },
+
+  // Métricas do Instagram (só leitura)
+  { method: "GET", pattern: ["clientes", ":slug", "metricas"], run: ({ seg, q }) => clientMetrics(seg[1], q) },
+
+  // Dias de produção
+  { method: "GET", pattern: ["clientes", ":slug", "producao"], run: ({ seg, q }) => clientProductionDays(seg[1], q) },
+  { method: "POST", pattern: ["clientes", ":slug", "producao"], status: 201, run: async ({ seg, body }) => createProductionDayApi(seg[1], await body()) },
+  { method: "GET", pattern: ["producao", ":id"], run: ({ seg }) => getProductionDay(seg[1]) },
+  { method: "PATCH", pattern: ["producao", ":id"], run: async ({ seg, body }) => updateProductionDayApi(seg[1], await body()) },
+  { method: "DELETE", pattern: ["producao", ":id"], run: ({ seg, bot }) => deleteProductionDayApi(seg[1], bot) },
+  { method: "PUT", pattern: ["producao", ":id", "ordem"], run: async ({ seg, body }) => setProductionOrderApi(seg[1], await body()) },
+  { method: "PUT", pattern: ["producao", ":id", "roteiros", ":bloco"], run: async ({ seg, body }) => setProductionStateApi(seg[1], seg[3], await body()) },
+
+  // Aba Tendências (rascunhos; liberar para a cliente só pelo painel)
+  { method: "GET", pattern: ["clientes", ":slug", "tendencias"], run: ({ seg, q }) => clientTrends(seg[1], q) },
+  { method: "POST", pattern: ["clientes", ":slug", "tendencias"], status: 201, run: async ({ seg, bot, body }) => createTrendApi(seg[1], bot, await body()) },
+  { method: "GET", pattern: ["tendencias", ":id"], run: ({ seg }) => getTrendApi(seg[1]) },
+  { method: "PATCH", pattern: ["tendencias", ":id"], run: async ({ seg, body }) => updateTrendApi(seg[1], await body()) },
+  { method: "DELETE", pattern: ["tendencias", ":id"], run: ({ seg, bot }) => deleteTrendApi(seg[1], bot) },
+  { method: "POST", pattern: ["tendencias", ":id", "virar-roteiro"], status: 201, run: async ({ seg, bot, body }) => trendToScriptApi(seg[1], bot, await body()) },
 ];
 
 const matches = (pattern: string[], seg: string[]) =>

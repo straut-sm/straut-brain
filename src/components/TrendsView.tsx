@@ -2,7 +2,7 @@
 
 import {
   ArrowLeft, Check, ChevronDown, CircleDashed, Copy, ExternalLink, Eye, EyeOff, FileText, Loader2, Pencil, Plus, Sparkles,
-  Trash2, Video, X,
+  Trash2, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -204,7 +204,6 @@ function Week({ items, canEdit, onEdit, onAdd, onPublish, onOpenStories, onToScr
   const by = (k: TrendKind) => items.filter((i) => i.kind === k).sort((a, b) => a.position - b.position);
   const mercado = by("mercado");
   const refs = by("referencia");
-  const gravar = by("gravar");
   const stories = by("stories");
   const published = items.length > 0 && items.every((i) => i.published);
 
@@ -257,50 +256,24 @@ function Week({ items, canEdit, onEdit, onAdd, onPublish, onOpenStories, onToScr
                 {r.handle && r.title && <p className="mb-1 text-sm font-medium leading-snug">{r.title}</p>}
                 {r.body && <p className="whitespace-pre-line text-[13px] leading-relaxed text-graphite">{r.body}</p>}
                 {r.adapt && <p className="mt-2.5 rounded-lg bg-[#eef4ec] px-2.5 py-2 text-xs leading-relaxed" style={{ color: GREEN_TEXT }}><b className="font-semibold">Como adaptar:</b> {r.adapt}</p>}
-                {r.link && (
-                  <a href={r.link} target="_blank" rel="noreferrer" className="mt-auto inline-flex items-center gap-1 self-start pt-3 text-xs font-medium text-muted hover:text-ink">
-                    Ver referência <ExternalLink size={12} />
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-          {!refs.length && <Empty text="Nenhuma referência ainda." />}
-        </section>
-      )}
-
-      {/* Para gravar */}
-      {(gravar.length > 0 || canEdit) && (
-        <section>
-          <SectionHead title="Para gravar" onAdd={canEdit ? () => onAdd("gravar") : undefined} />
-          <div className="flex flex-col gap-2">
-            {gravar.map((g) => (
-              <div key={g.id} className="flex flex-col gap-3 rounded-2xl border border-mist bg-paper p-4 sm:flex-row sm:items-start">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "#f4ece6", color: "#9a4429" }}>
-                  <Video size={17} strokeWidth={1.8} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold leading-snug">{g.title}</p>
-                  {g.body && <p className="mt-0.5 whitespace-pre-line text-[13px] leading-relaxed text-graphite">{g.body}</p>}
-                  {g.steps.length > 0 && (
-                    <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-[13px] text-graphite">
-                      {g.steps.map((s, i) => <li key={i}>{s}</li>)}
-                    </ol>
-                  )}
-                  {g.adapt && <p className="mt-2 text-xs" style={{ color: GREEN_TEXT }}><b className="font-semibold">Dica:</b> {g.adapt}</p>}
-                </div>
-                {canEdit && (
-                  <div className="flex shrink-0 gap-1.5">
-                    <button onClick={() => onToScript(g)} className="inline-flex items-center gap-1.5 rounded-xl border border-sand px-3 py-1.5 text-xs font-medium hover:bg-cream">
-                      <FileText size={13} /> Virar roteiro
-                    </button>
-                    <button onClick={() => onEdit(g)} aria-label="Editar" className="rounded-xl p-2 text-muted hover:bg-cream hover:text-ink"><Pencil size={14} /></button>
+                {(r.link || canEdit) && (
+                  <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
+                    {r.link ? (
+                      <a href={r.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink">
+                        Ver referência <ExternalLink size={12} />
+                      </a>
+                    ) : <span />}
+                    {canEdit && (
+                      <button onClick={() => onToScript(r)} className="inline-flex items-center gap-1.5 rounded-xl border border-sand px-3 py-1.5 text-xs font-medium hover:bg-cream">
+                        <FileText size={13} /> Virar roteiro
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             ))}
           </div>
-          {!gravar.length && <Empty text="Nenhuma ideia para gravar ainda." />}
+          {!refs.length && <Empty text="Nenhuma referência ainda." />}
         </section>
       )}
 
@@ -466,7 +439,7 @@ function Editor({ kind, item, onClose, onSave, onDelete }: {
   });
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((x) => ({ ...x, [k]: e.target.value }));
   const isRef = kind === "referencia";
-  const hasSteps = kind === "gravar" || kind === "stories";
+  const hasSteps = kind === "stories";
   const input = "w-full rounded-lg border border-mist bg-paper px-3 py-2 text-sm focus:border-sand focus:outline-none";
   const label = "mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted";
   const submit = (e: React.FormEvent) => {

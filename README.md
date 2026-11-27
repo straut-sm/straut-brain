@@ -49,6 +49,8 @@ time: `straut-team/integracoes/api-dos-bots.md`.
 
 - Cabeçalhos: `Authorization: Bearer <BOTS_API_KEY>` e `X-Bot: <nome-do-bot>`.
 - Limite de 60 requisições por minuto por bot; toda chamada fica registrada em `bot_requests`.
+- Também leem as métricas do Instagram, os dias de produção (e marcam a lista) e a aba Tendências
+  (criam e editam rascunhos e usam "Virar roteiro"; liberar para a cliente continua só no painel).
 - Os bots podem apagar, marcar como publicado e aceitar sugestões. Aprovar, restaurar versões e o
   cadastro das clientes continuam só no painel.
 - **Lixeira:** apagar (pelo painel ou pela API) só marca `deleted_at`. O item fica 30 dias na Lixeira
@@ -89,8 +91,9 @@ dos 3 melhores posts do mês que ainda não têm motivo. A página principal mos
 ## Aba Tendências
 
 Página `/c/[slug]/tendencias` (Straut: edita, libera, "Virar roteiro") e `/p/[slug]/tendencias` (cliente: só lê o
-que foi liberado). Tabela `trend_items`: uma linha por item, `kind` = `mercado` | `referencia` | `gravar` | `stories`,
-agrupados por `week_of` (segunda-feira). A semana só aparece para a cliente com `published_at` preenchido (botão
+que foi liberado). Tabela `trend_items`: uma linha por item, `kind` = `mercado` | `referencia` | `stories`,
+agrupados por `week_of` (segunda-feira). O antigo `gravar` saiu em 27/11/2026 (repetia as referências): cada
+referência tem "Virar roteiro" (`src/lib/trends.ts`), que cria o roteiro com o texto, o "como adaptar" e o link. A semana só aparece para a cliente com `published_at` preenchido (botão
 "Liberar para a cliente"). `clients.trends_seen_at` controla o aviso "nova" no botão da cliente. A rotina
 `painel-tendencias-semana` (segunda às 10h, no computador do Guilherme) pesquisa e grava a semana como rascunho.
 Apagar manda para a Lixeira.

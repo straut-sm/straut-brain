@@ -10,6 +10,7 @@ import { authClient } from "@/lib/supabase/server";
 import { FORMATS, PLANNED } from "@/lib/meta";
 import { EVENT_COLS, TREND_COLS, loadBlock, mapEvents, mapTrends } from "@/lib/data";
 import { driveFileId, drivePath } from "@/lib/drive";
+import { trendToBlock } from "@/lib/trends";
 import { listTrash, purgeItem, restoreItem, trashBlock, trashEvent, trashFile, trashMedia, trashTrend, type TrashEntry, type TrashKind } from "@/lib/trash";
 import type { Block, CalendarEvent, ClientInput, ProductionState, TrendInput, TrendItem, FileKind, Format, MediaKind, PostFormat, Snapshot, Status } from "@/lib/types";
 
@@ -682,7 +683,7 @@ export async function setPostReason(postId: string, reason: string): Promise<Res
 // Aba Tendências
 // ---------------------------------------------------------------------------
 
-const TREND_KINDS = ["mercado", "referencia", "gravar", "stories"];
+const TREND_KINDS = ["mercado", "referencia", "stories"]; // "gravar" saiu (repetia as referências)
 const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 
 async function getTrend(id: string) {
@@ -747,23 +748,13 @@ export async function publishTrendWeek(clientId: string, weekOf: string, publish
   });
 }
 
-/** Ideia da aba Tendências vira um roteiro no calendário (data de hoje; dá para arrastar depois). */
+/** Item da aba Tendências (referência, tendência ou Stories) vira um roteiro no calendário (data de hoje). */
 export async function trendToScript(id: string, date: string): Promise<Result<string>> {
   return run(async () => {
     await requireAdmin();
     const t = await getTrend(id);
     if (!YMD.test(date)) throw new AccessError("Data inválida.");
-    const steps = (Array.isArray(t.steps) ? t.steps : []).map((x: string, i: number) => `${i + 1}. ${x}`);
-    const script = [t.body, t.adapt && `${t.kind === "referencia" ? "Como adaptar" : "Dica"}: ${t.adapt}`, steps.length && steps.join("\n"), t.link && `Referência: ${t.link}`]
-      .filter(Boolean).join("\n\n");
-    const blockId = crypto.randomUUID();
-    const { error } = await db().from("blocks").insert({
-      id: blockId, client_id: t.client_id, date, title: t.title || "Ideia da aba Tendências", script,
-      planned_format: t.kind === "stories" ? null : "reels",
-    });
-    if (error) throw error;
-    await log(blockId, "Straut", "Bloco criado como Roteiro a partir da aba Tendências");
-    return blockId;
+    return trendToBlock(t, date);
   });
 }
 

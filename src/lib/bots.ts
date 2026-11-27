@@ -1,10 +1,12 @@
 import "server-only";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { db } from "./supabase/admin";
-import { BLOCK_COLS, mapBlocks } from "./data";
+import { BLOCK_COLS, EVENT_COLS, TREND_COLS, loadMetrics, loadProduction, mapBlocks, mapEvents, mapTrends } from "./data";
+import { addDays, matchPosts, summarize } from "./metrics";
+import { trendToBlock } from "./trends";
 import { driveFileId, drivePath } from "./drive";
-import { trashBlock, trashMedia } from "./trash";
-import type { Block, Format, MediaKind, PostFormat, Status } from "./types";
+import { trashBlock, trashEvent, trashMedia, trashTrend } from "./trash";
+import type { Block, Format, MediaKind, PostFormat, ProductionState, Status, TrendItem } from "./types";
 
 /*
  * API dos bots (OpenBot). Especificação: straut-team/integracoes/api-dos-bots.md
@@ -138,6 +140,7 @@ function serialize(b: Block, slug: string, full: boolean) {
     status: b.status,
     legenda: b.caption,
     roteiro: b.script,
+    link_instagram: b.instagramUrl || null,
     midias: b.media.map((m) => ({
       id: m.id,
       tipo: MEDIA_TYPE[m.kind],
@@ -365,6 +368,19 @@ export async function updateBlockApi(id: string, bot: string, body: Record<strin
     await patchBlock(id, Object.fromEntries(changed.map((k) => [k, next[k]])));
     await history(id, bot, `Editou ${changed.map((k) => FIELD_NAMES[k]).join(", ")}`, snap(b));
   }
+  // Link do post publicado (liga o bloco às métricas). "" ou null tira o link.
+  if (body.link_instagram !== undefined) {
+    const url = (body.link_instagram === null ? "" : text(body.link_instagram, "link_instagram", 300) ?? "").trim();
+    if (url && b.format === "roteiro") throw new ApiError(409, "Roteiro não tem post publicado: avance o bloco antes.");
+    if (url && !/^https:\/\/(www\.)?instagram\.com\/(?:[\w.]+\/)?(p|reel|reels|tv)\/[\w-]+/i.test(url)) {
+      throw new ApiError(400, "link_instagram inválido: use o link do post (instagram.com/p/... ou /reel/...).");
+    }
+    const { data: cur } = await db().from("blocks").select("instagram_url").eq("id", id).single();
+    if ((cur?.instagram_url ?? "") !== url) {
+      await patchBlock(id, { instagram_url: url });
+      await history(id, bot, url ? "Ligou o bloco ao post do Instagram" : "Tirou o link do Instagram");
+    }
+  }
   return getBlockApi(id);
 }
 
@@ -515,4 +531,326 @@ export async function deleteMediaApi(id: string, mediaId: string, bot: string) {
   await trashMedia([mediaId], `bot ${bot}`);
   await history(id, bot, `Moveu ${m.kind === "video" ? "o vídeo" : m.kind === "cover" ? "a capa" : "uma imagem"} para a lixeira`);
   return getBlockApi(id);
+}
+
+// ---------------------------------------------------------------------------
+// Métricas do Instagram (só leitura; os números vêm do mLabs pela rotina do Claude)
+// ---------------------------------------------------------------------------
+
+const todaySP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+const round = (n: number | null, d = 0) => (n === null ? null : Math.round(n * 10 ** d) / 10 ** d);
+
+/** Resumo do mês (mesmas regras da página da cliente), top 3, posts e seguidores. */
+export async function clientMetrics(slug: string, p: URLSearchParams) {
+  const c = await clientBySlug(slug);
+  const today = todaySP();
+  const dias = Math.min(150, Math.max(1, Number(p.get("dias") ?? 90) || 90));
+  const [[m], blocks] = await Promise.all([
+    loadMetrics([c.id]),
+    loadBlocks((q) => q.eq("client_id", c.id).neq("format", "roteiro").gte("date", addDays(today, -150))),
+  ]);
+  if (!m?.syncedAt) {
+    return { cliente: c.slug, sincronizado_em: null, aguardando_sincronizacao: true, resumo_do_mes: null, top3: [], posts: [], seguidores: [] };
+  }
+  const s = summarize(m, today);
+  const blockOf = matchPosts(m.posts, blocks);
+  const post = (x: (typeof m.posts)[number]) => ({
+    id: x.id,
+    data: x.date,
+    formato: x.format,
+    link: x.permalink,
+    legenda: x.caption,
+    alcance: x.reach,
+    visualizacoes: x.views,
+    curtidas: x.likes,
+    comentarios: x.comments,
+    salvamentos: x.saves,
+    compartilhamentos: x.shares,
+    estrela: s.starred.has(x.id),
+    bloco_id: blockOf.get(x.id) ?? null,
+  });
+  const since = addDays(today, -dias);
+  return {
+    cliente: c.slug,
+    sincronizado_em: m.syncedAt,
+    aguardando_sincronizacao: false,
+    resumo_do_mes: {
+      periodo: { de: s.from, ate: s.to },
+      comparado_com: { de: s.prevFrom, ate: s.prevTo },
+      posts: s.postCount,
+      alcance_medio: round(s.avgReach),
+      alcance_medio_variacao_pct: round(s.avgReachDelta, 1),
+      seguidores: s.followers,
+      seguidores_ganhos: s.followersGain,
+      seguidores_ganhos_desde: s.followersSince,
+      seguidores_ganhos_mes_anterior: s.followersGainPrev,
+      salvamentos: s.saves,
+      salvamentos_variacao_pct: round(s.savesDelta, 1),
+      compartilhamentos: s.shares,
+      compartilhamentos_variacao_pct: round(s.sharesDelta, 1),
+      media_alcance_90_dias: round(s.baseline),
+      posts_com_estrela_no_mes: s.starredThisMonth,
+    },
+    top3: s.top.map((x) => ({ ...post(x), motivo: x.reason || null })),
+    posts: m.posts.filter((x) => x.date >= since).sort((a, b) => b.date.localeCompare(a.date)).map(post),
+    seguidores: m.followers.map((f) => ({ data: f.date, seguidores: f.followers })),
+    regras: "Mês atual (dia 1 até hoje) contra os mesmos dias do mês anterior. Estrela = alcance acima da média dos últimos 90 dias. Top 3 = maior alcance + salvamentos + compartilhamentos.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Dias de produção (evento no calendário com a lista de roteiros para gravar)
+// ---------------------------------------------------------------------------
+
+const PROD_STATES: ProductionState[] = ["pendente", "gravado", "oculto"];
+
+async function eventWithClient(id: string) {
+  if (!UUID.test(id)) throw new ApiError(404, "Dia de produção não encontrado.");
+  const { data } = await db().from("events").select(`${EVENT_COLS}, clients(slug, active)`).eq("id", id).is("deleted_at", null).maybeSingle();
+  const c = (data as { clients?: { slug: string; active: boolean } } | null)?.clients;
+  if (!data || !c?.active) throw new ApiError(404, "Dia de produção não encontrado.");
+  return { event: mapEvents([data])[0], slug: c.slug };
+}
+
+const serializeEvent = (e: ReturnType<typeof mapEvents>[number], slug: string) => ({
+  id: e.id, cliente: slug, data: e.date, titulo: e.title, observacoes: e.notes, link: `${PANEL_URL}/c/${slug}/producao/${e.id}`,
+});
+
+export async function clientProductionDays(slug: string, p: URLSearchParams) {
+  const c = await clientBySlug(slug);
+  const de = ymdParam(p.get("de"), "de"), ate = ymdParam(p.get("ate"), "ate");
+  let q = db().from("events").select(EVENT_COLS).eq("client_id", c.id).eq("kind", "producao").is("deleted_at", null);
+  if (de) q = q.gte("date", de);
+  if (ate) q = q.lte("date", ate);
+  const { data, error } = await q.order("date");
+  if (error) throw error;
+  return mapEvents(data ?? []).map((e) => serializeEvent(e, c.slug));
+}
+
+/** O dia com a lista do mesmo jeito que o painel mostra: para gravar (na ordem), gravados e escondidos. */
+export async function getProductionDay(id: string) {
+  const { event, slug } = await eventWithClient(id);
+  const prod = await loadProduction(id, event.clientId);
+  if (!prod) throw new ApiError(404, "Dia de produção não encontrado.");
+  const items = new Map(prod.items.map((i) => [i.blockId, i]));
+  const elsewhere = new Set(prod.doneElsewhere);
+  const blocks = (await loadBlocks((q) => q.eq("client_id", event.clientId))).filter((b) => {
+    const it = items.get(b.id);
+    return b.format === "roteiro" ? !elsewhere.has(b.id) || !!it : it?.state === "gravado";
+  });
+  const pos = (b: Block) => items.get(b.id)?.position ?? Number.MAX_SAFE_INTEGER;
+  blocks.sort((a, b) => pos(a) - pos(b) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const st = (b: Block) => items.get(b.id)?.state ?? "pendente";
+  const row = (b: Block) => ({ ...serialize(b, slug, false), estado: st(b) });
+  return {
+    ...serializeEvent(event, slug),
+    para_gravar: blocks.filter((b) => st(b) === "pendente").map(row),
+    gravados: blocks.filter((b) => st(b) === "gravado").map(row),
+    escondidos: blocks.filter((b) => st(b) === "oculto").map(row),
+  };
+}
+
+export async function createProductionDayApi(slug: string, body: Record<string, unknown>) {
+  const c = await clientBySlug(slug);
+  const date = ymdParam(body.data as string, "data");
+  if (!date) throw new ApiError(400, "Informe a data (AAAA-MM-DD).");
+  const title = (text(body.titulo, "titulo", 120) ?? "").trim() || "Produção de conteúdo";
+  const notes = text(body.observacoes, "observacoes", 4000) ?? "";
+  const { data, error } = await db().from("events").insert({ client_id: c.id, date, kind: "producao", title, notes }).select("id").single();
+  if (error) throw error;
+  return getProductionDay(data.id);
+}
+
+export async function updateProductionDayApi(id: string, body: Record<string, unknown>) {
+  await eventWithClient(id);
+  const patch: Record<string, string> = {};
+  const date = ymdParam(body.data as string | undefined, "data");
+  if (date) patch.date = date;
+  const t = text(body.titulo, "titulo", 120);
+  if (t !== undefined) patch.title = t.trim() || "Produção de conteúdo";
+  const n = text(body.observacoes, "observacoes", 4000);
+  if (n !== undefined) patch.notes = n;
+  if (Object.keys(patch).length) {
+    const { error } = await db().from("events").update(patch).eq("id", id);
+    if (error) throw error;
+  }
+  return getProductionDay(id);
+}
+
+export async function deleteProductionDayApi(id: string, bot: string) {
+  await eventWithClient(id);
+  await trashEvent(id, `bot ${bot}`);
+  return { apagado: true, id, lixeira: "Fica 30 dias na Lixeira do painel e pode ser restaurado pelo Guilherme." };
+}
+
+/** Marca um roteiro do dia: pendente (para gravar), gravado ou oculto. Só visual: o bloco não muda. */
+export async function setProductionStateApi(id: string, blockId: string, body: Record<string, unknown>) {
+  const { event } = await eventWithClient(id);
+  const state = String(body.estado ?? "") as ProductionState;
+  if (!PROD_STATES.includes(state)) throw new ApiError(400, `estado inválido: use ${PROD_STATES.join(", ")}.`);
+  if (!UUID.test(blockId)) throw new ApiError(404, "Bloco não encontrado.");
+  const { data: b } = await db().from("blocks").select("id").eq("id", blockId).eq("client_id", event.clientId).is("deleted_at", null).maybeSingle();
+  if (!b) throw new ApiError(404, "Bloco não encontrado nesta cliente.");
+  const { data: cur } = await db().from("production_items").select("position").eq("event_id", id).eq("block_id", blockId).maybeSingle();
+  let position = cur?.position as number | undefined;
+  if (position === undefined) {
+    const { data: last } = await db().from("production_items").select("position").eq("event_id", id).order("position", { ascending: false }).limit(1);
+    position = (last?.[0]?.position ?? -1) + 1;
+  }
+  const { error } = await db().from("production_items").upsert(
+    { event_id: id, block_id: blockId, position, state, updated_at: new Date().toISOString() },
+    { onConflict: "event_id,block_id" },
+  );
+  if (error) throw error;
+  return getProductionDay(id);
+}
+
+/** Nova ordem da lista "para gravar" (ids dos roteiros). Não muda a data de publicação. */
+export async function setProductionOrderApi(id: string, body: Record<string, unknown>) {
+  const { event } = await eventWithClient(id);
+  const ids = body.ids;
+  if (!Array.isArray(ids) || ids.length > 500 || !ids.every((x) => UUID.test(String(x))) || new Set(ids).size !== ids.length) {
+    throw new ApiError(400, 'Envie "ids": a lista de roteiros na nova ordem, sem repetir.');
+  }
+  if (ids.length) {
+    const list = ids.map(String);
+    const { data } = await db().from("blocks").select("id").eq("client_id", event.clientId).in("id", list);
+    if ((data ?? []).length !== list.length) throw new ApiError(404, "Algum bloco não é desta cliente.");
+    const { data: current } = await db().from("production_items").select("block_id, state").eq("event_id", id).in("block_id", list);
+    const state = new Map((current ?? []).map((c) => [c.block_id as string, c.state as string]));
+    const rows = list.map((x, position) => ({
+      event_id: id, block_id: x, position, state: state.get(x) ?? "pendente", updated_at: new Date().toISOString(),
+    }));
+    const { error } = await db().from("production_items").upsert(rows, { onConflict: "event_id,block_id" });
+    if (error) throw error;
+  }
+  return getProductionDay(id);
+}
+
+// ---------------------------------------------------------------------------
+// Aba Tendências. Os bots leem tudo e criam ou editam rascunhos; liberar para a
+// cliente continua só com a Straut, pelo painel.
+// ---------------------------------------------------------------------------
+
+const TREND_KINDS = ["mercado", "referencia", "stories"] as const;
+const TREND_GROUP: Record<string, string> = { mercado: "tendencia_do_mes", referencia: "referencias", stories: "stories" };
+
+const serializeTrend = (t: TrendItem) => ({
+  id: t.id, semana: t.weekOf, tipo: t.kind, titulo: t.title, texto: t.body, perfil: t.handle || null, link: t.link || null,
+  destaque: t.stat || null, como_adaptar: t.adapt || null, passos: t.steps, posicao: t.position, criado_por: t.createdBy,
+  liberado: t.published,
+});
+
+function mondayOf(ymd: string) {
+  const wd = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return addDays(ymd, -((wd + 6) % 7));
+}
+
+type TrendRow = Parameters<typeof trendToBlock>[0] & { published_at: string | null };
+
+async function trendWithClient(id: string) {
+  if (!UUID.test(id)) throw new ApiError(404, "Item não encontrado.");
+  const { data } = await db().from("trend_items").select(`${TREND_COLS}, clients(slug, active)`)
+    .eq("id", id).is("deleted_at", null).in("kind", [...TREND_KINDS]).maybeSingle();
+  const c = (data as { clients?: { slug: string; active: boolean } } | null)?.clients;
+  if (!data || !c?.active) throw new ApiError(404, "Item não encontrado.");
+  return { row: data as unknown as TrendRow, item: mapTrends([data])[0], slug: c.slug };
+}
+
+/** Semanas da cliente (a mais recente primeiro), com os itens agrupados por tipo. */
+export async function clientTrends(slug: string, p: URLSearchParams) {
+  const c = await clientBySlug(slug);
+  const semana = ymdParam(p.get("semana"), "semana");
+  let q = db().from("trend_items").select(TREND_COLS).eq("client_id", c.id).is("deleted_at", null).in("kind", [...TREND_KINDS]);
+  if (semana) q = q.eq("week_of", mondayOf(semana));
+  const { data, error } = await q.order("week_of", { ascending: false }).order("position").limit(500);
+  if (error) throw error;
+  const items = mapTrends(data ?? []);
+  const max = Math.min(12, Math.max(1, Number(p.get("semanas") ?? 4) || 4));
+  const weeks = [...new Set(items.map((i) => i.weekOf))].slice(0, max);
+  return weeks.map((w) => {
+    const list = items.filter((i) => i.weekOf === w);
+    return {
+      semana: w,
+      liberada: list.length > 0 && list.every((i) => i.published),
+      link: `${PANEL_URL}/c/${c.slug}/tendencias`,
+      ...Object.fromEntries(TREND_KINDS.map((k) => [TREND_GROUP[k], list.filter((i) => i.kind === k).map(serializeTrend)])),
+    };
+  });
+}
+
+function trendFields(body: Record<string, unknown>, partial: boolean) {
+  const out: Record<string, unknown> = {};
+  if (!partial || body.tipo !== undefined) {
+    if (!TREND_KINDS.includes(body.tipo as (typeof TREND_KINDS)[number])) throw new ApiError(400, `tipo inválido: use ${TREND_KINDS.join(", ")}.`);
+    out.kind = body.tipo;
+  }
+  const map: [string, string, number][] = [
+    ["titulo", "title", 200], ["texto", "body", 3000], ["perfil", "handle", 80], ["link", "link", 400], ["destaque", "stat", 80], ["como_adaptar", "adapt", 1000],
+  ];
+  for (const [api, col, max] of map) {
+    const v = body[api] === null ? "" : text(body[api], api, max);
+    if (v !== undefined) out[col] = v.trim();
+  }
+  if (typeof out.handle === "string" && out.handle) out.handle = `@${out.handle.replace(/^@/, "")}`;
+  if (typeof out.link === "string" && out.link && !/^https?:\/\//i.test(out.link)) throw new ApiError(400, "link precisa começar com https://");
+  if (body.passos !== undefined) {
+    if (!Array.isArray(body.passos) || body.passos.length > 12) throw new ApiError(400, '"passos" deve ser uma lista de até 12 textos.');
+    out.steps = body.passos.map((x) => String(x).trim().slice(0, 400)).filter(Boolean);
+  }
+  return out;
+}
+
+export async function createTrendApi(slug: string, bot: string, body: Record<string, unknown>) {
+  const c = await clientBySlug(slug);
+  const week = mondayOf(ymdParam(body.semana as string | undefined, "semana") ?? todaySP());
+  const fields = trendFields(body, false);
+  if (!fields.title && !fields.handle) throw new ApiError(400, "Informe o titulo (ou o perfil, para referências).");
+  if (fields.kind === "referencia" && !fields.link) throw new ApiError(400, "Referência precisa do link do post real.");
+  const { data: weekItems } = await db().from("trend_items").select("position, published_at").eq("client_id", c.id).eq("week_of", week).is("deleted_at", null);
+  if ((weekItems ?? []).some((w) => w.published_at)) {
+    throw new ApiError(409, "Esta semana já foi liberada para a cliente. Peça ao Guilherme para esconder a semana antes de mudar.");
+  }
+  const position = (weekItems ?? []).reduce((m, w) => Math.max(m, w.position as number), -1) + 1;
+  const { data, error } = await db().from("trend_items")
+    .insert({ ...fields, client_id: c.id, week_of: week, position, created_by: `bot ${bot}`, published_at: null })
+    .select(TREND_COLS).single();
+  if (error) throw error;
+  return { ...serializeTrend(mapTrends([data])[0]), cliente: c.slug };
+}
+
+export async function getTrendApi(id: string) {
+  const { item, slug } = await trendWithClient(id);
+  return { ...serializeTrend(item), cliente: slug };
+}
+
+/** Só rascunhos: o que a cliente já vê fica com a Straut. */
+async function draftOnly(id: string) {
+  const t = await trendWithClient(id);
+  if (t.row.published_at) throw new ApiError(409, "Este item já foi liberado para a cliente. Só a Straut muda, pelo painel.");
+  return t;
+}
+
+export async function updateTrendApi(id: string, body: Record<string, unknown>) {
+  await draftOnly(id);
+  const fields = trendFields(body, true);
+  if (Object.keys(fields).length) {
+    const { error } = await db().from("trend_items").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+  }
+  return getTrendApi(id);
+}
+
+export async function deleteTrendApi(id: string, bot: string) {
+  await draftOnly(id);
+  await trashTrend(id, `bot ${bot}`);
+  return { apagado: true, id, lixeira: "Fica 30 dias na Lixeira do painel e pode ser restaurado pelo Guilherme." };
+}
+
+/** Referência (ou outro item) vira roteiro no calendário. */
+export async function trendToScriptApi(id: string, bot: string, body: Record<string, unknown>) {
+  const { row } = await trendWithClient(id);
+  const date = ymdParam(body.data as string | undefined, "data") ?? todaySP();
+  const blockId = await trendToBlock(row, date, bot);
+  return getBlockApi(blockId);
 }
