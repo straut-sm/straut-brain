@@ -321,73 +321,176 @@ function Row({ block, onOpen, tone, action }: { block: Block; onOpen: () => void
   );
 }
 
-/** Lista "Para gravar": arrastar pelo ⠿ muda a ordem; deslizar para os lados marca. */
+/**
+ * Lista "Para gravar": arrastar pelo ⠿ muda a ordem; deslizar para os lados marca.
+ *
+ * O arraste não troca os elementos de lugar enquanto o dedo está na tela (isso fazia o navegador
+ * perder o ponteiro): o bloco segue o dedo com transform, os outros abrem espaço com animação,
+ * e a nova ordem só é gravada ao soltar. Perto da borda da tela, a página rola sozinha.
+ */
+const DROP_MS = 200;
+const EDGE = 72; // px da borda da tela em que a página começa a rolar
+
+type Geo = { from: number; rects: { top: number; bottom: number }[]; gap: number };
+type Drag = { id: string; to: number; dy: number; dropping: boolean };
+
 function PendingList({ blocks, canEdit, onOpen, onDone, onHide, onReorder }: {
   blocks: Block[]; canEdit: boolean; onOpen: (id: string) => void;
   onDone: (id: string) => void; onHide: (id: string) => void; onReorder: (ids: string[]) => void;
 }) {
   const ids = blocks.map((b) => b.id);
-  const [order, setOrder] = useState<string[] | null>(null); // ordem durante o arraste
-  const [dragging, setDragging] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const rows = useRef(new Map<string, HTMLLIElement>());
-  const shown = (order ?? ids).map((id) => blocks.find((b) => b.id === id)).filter((b): b is Block => !!b);
+  const geo = useRef<Geo | null>(null);
+  const live = useRef<{ id: string; startY: number; clientY: number; to: number; moved: boolean; raf: number; stop: () => void } | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
 
-  const startDrag = (id: string, e: React.PointerEvent) => {
-    if (!canEdit) return;
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setDragging(id);
-    setOrder(ids);
-  };
-  const moveDrag = (e: React.PointerEvent) => {
-    if (!dragging || !order) return;
-    const y = e.clientY;
-    const from = order.indexOf(dragging);
-    let to = from;
-    order.forEach((id, i) => {
-      const el = rows.current.get(id);
-      if (!el || id === dragging) return;
-      const r = el.getBoundingClientRect();
-      const mid = r.top + r.height / 2;
-      if (i < from && y < mid) to = Math.min(to, i);
-      if (i > from && y > mid) to = Math.max(to, i);
+  // iPhone: sem isso, segurar o ⠿ seleciona o texto ou abre o menu do sistema.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !canEdit) return;
+    const block = (e: TouchEvent) => {
+      if ((e.target as Element | null)?.closest?.("[data-drag-handle]")) e.preventDefault();
+    };
+    el.addEventListener("touchstart", block, { passive: false });
+    return () => el.removeEventListener("touchstart", block);
+  }, [canEdit]);
+
+  useEffect(() => () => live.current?.stop(), []);
+
+  const compute = () => {
+    const s = live.current;
+    const g = geo.current;
+    if (!s || !g) return;
+    const r = g.rects;
+    const me = r[g.from];
+    const min = r[0].top - me.top;
+    const max = r[r.length - 1].bottom - me.bottom;
+    const dy = Math.max(min, Math.min(max, s.clientY + window.scrollY - s.startY));
+    const center = (me.top + me.bottom) / 2 + dy;
+    let to = g.from;
+    r.forEach((x, i) => {
+      const mid = (x.top + x.bottom) / 2;
+      if (i < g.from && center < mid) to = Math.min(to, i);
+      if (i > g.from && center > mid) to = Math.max(to, i);
     });
-    if (to !== from) {
-      const next = [...order];
-      next.splice(from, 1);
-      next.splice(to, 0, dragging);
-      setOrder(next);
-    }
+    s.to = to;
+    setDrag({ id: s.id, to, dy, dropping: false });
   };
-  const endDrag = () => {
-    if (order && order.join() !== ids.join()) onReorder(order);
-    setDragging(null);
-    setOrder(null);
+
+  const start = (id: string, e: React.PointerEvent) => {
+    if (!canEdit || live.current || drag || (e.pointerType === "mouse" && e.button !== 0)) return;
+    e.preventDefault();
+    e.stopPropagation(); // não deixa o gesto de deslizar do bloco começar junto
+    window.getSelection()?.removeAllRanges();
+
+    const rects = ids.map((x) => {
+      const r = rows.current.get(x)?.getBoundingClientRect();
+      return { top: (r?.top ?? 0) + window.scrollY, bottom: (r?.bottom ?? 0) + window.scrollY };
+    });
+    const from = ids.indexOf(id);
+    geo.current = { from, rects, gap: rects.length > 1 ? Math.max(0, rects[1].top - rects[0].bottom) : 0 };
+
+    const pointerId = e.pointerId;
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId || !live.current) return;
+      ev.preventDefault();
+      live.current.clientY = ev.clientY;
+      live.current.moved = true;
+    };
+    const onEnd = (ev: PointerEvent) => { if (ev.pointerId === pointerId) finish(); };
+    const tick = () => {
+      const s = live.current;
+      if (!s) return;
+      const h = window.innerHeight;
+      const v = s.clientY < EDGE ? -Math.ceil((EDGE - s.clientY) / 4) : s.clientY > h - EDGE ? Math.ceil((s.clientY - (h - EDGE)) / 4) : 0;
+      if (v) window.scrollBy(0, v);
+      if (v || s.moved) { s.moved = false; compute(); }
+      s.raf = requestAnimationFrame(tick);
+    };
+    const prevSelect = document.body.style.userSelect;
+    const stop = () => {
+      if (live.current) cancelAnimationFrame(live.current.raf);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      document.body.style.userSelect = prevSelect;
+      document.body.style.removeProperty("-webkit-user-select");
+    };
+
+    live.current = { id, startY: e.clientY + window.scrollY, clientY: e.clientY, to: from, moved: false, raf: 0, stop };
+    document.body.style.userSelect = "none";
+    document.body.style.setProperty("-webkit-user-select", "none");
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
+    live.current.raf = requestAnimationFrame(tick);
+    navigator.vibrate?.(8);
+    setDrag({ id, to: from, dy: 0, dropping: false });
+  };
+
+  const finish = () => {
+    const s = live.current;
+    const g = geo.current;
+    if (!s || !g) return;
+    s.stop();
+    live.current = null;
+    const { from, rects } = g;
+    const to = s.to;
+    // Leva o bloco até o lugar novo antes de gravar a ordem.
+    const slot = to > from ? rects[to].bottom - rects[from].bottom : to < from ? rects[to].top - rects[from].top : 0;
+    setDrag({ id: s.id, to, dy: slot, dropping: true });
+    window.setTimeout(() => {
+      if (to !== from) {
+        const next = [...ids];
+        next.splice(from, 1);
+        next.splice(to, 0, s.id);
+        onReorder(next);
+      }
+      geo.current = null;
+      setDrag(null);
+    }, DROP_MS);
+  };
+
+  const styleFor = (id: string, i: number): React.CSSProperties | undefined => {
+    const g = geo.current;
+    if (!drag || !g) return undefined;
+    if (id === drag.id) {
+      return {
+        position: "relative",
+        zIndex: 20,
+        transform: `translate3d(0, ${drag.dy}px, 0) scale(${drag.dropping ? 1 : 1.02})`,
+        transition: drag.dropping ? `transform ${DROP_MS}ms cubic-bezier(.2,.8,.2,1)` : "none",
+        willChange: "transform",
+      };
+    }
+    const size = g.rects[g.from].bottom - g.rects[g.from].top + g.gap;
+    const shift = i > g.from && i <= drag.to ? -size : i < g.from && i >= drag.to ? size : 0;
+    return { transform: shift ? `translate3d(0, ${shift}px, 0)` : undefined, transition: `transform ${DROP_MS}ms ease` };
   };
 
   return (
-    <ul className="flex flex-col gap-2">
-      {shown.map((b) => (
-        <li key={b.id} ref={(el) => { if (el) rows.current.set(b.id, el); else rows.current.delete(b.id); }}>
+    <ul ref={listRef} className={`flex flex-col gap-2 ${canEdit ? "select-none [-webkit-touch-callout:none]" : ""}`}>
+      {blocks.map((b, i) => (
+        <li key={b.id} style={styleFor(b.id, i)} ref={(el) => { if (el) rows.current.set(b.id, el); else rows.current.delete(b.id); }}>
           <SwipeRow
             block={b}
             canEdit={canEdit}
-            lifted={dragging === b.id}
+            lifted={drag?.id === b.id && !drag.dropping}
             onOpen={() => onOpen(b.id)}
             onDone={() => onDone(b.id)}
             onHide={() => onHide(b.id)}
             handle={canEdit ? (
               <span
                 role="button"
+                data-drag-handle
                 aria-label="Arraste para mudar a ordem"
                 title="Arraste para mudar a ordem"
-                onPointerDown={(e) => startDrag(b.id, e)}
-                onPointerMove={moveDrag}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-                className="flex h-10 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted hover:bg-cream active:cursor-grabbing"
+                onPointerDown={(e) => start(b.id, e)}
+                onContextMenu={(e) => e.preventDefault()}
+                className={`flex h-11 w-9 shrink-0 touch-none select-none items-center justify-center rounded-lg text-muted hover:bg-cream ${drag?.id === b.id ? "cursor-grabbing bg-cream text-ink" : "cursor-grab"}`}
               >
-                <GripVertical size={16} />
+                <GripVertical size={18} />
               </span>
             ) : null}
           />
