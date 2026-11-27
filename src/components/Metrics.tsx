@@ -92,15 +92,31 @@ const CELL_BORDER = [
   "border-l border-t border-mist lg:border-t-0",
 ];
 
-function Stat({ i, label, value, sub, delta, series, hero = false }: {
-  i: number; label: string; value: string; sub?: React.ReactNode; delta: number | null; series: number[]; hero?: boolean;
+/** Selo de seguidores ganhos/perdidos no mês, no mesmo formato do selo de %. */
+function GainPill({ gain }: { gain: number }) {
+  const t = gain > 0 ? UP : gain < 0 ? DOWN : FLAT;
+  const Icon = gain > 0 ? ArrowUpRight : gain < 0 ? ArrowDownRight : Minus;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums" style={{ background: t.bg, color: t.text }}>
+      <Icon size={12} strokeWidth={2.2} />
+      {gain > 0 ? "+" : ""}{fmtInt(gain)}
+    </span>
+  );
+}
+
+function Stat({ i, label, short, value, sub, delta, badge, tone, series, hero = false }: {
+  i: number; label: string; short?: string; value: string; sub?: React.ReactNode; delta: number | null;
+  badge?: React.ReactNode; tone?: typeof UP; series: number[]; hero?: boolean;
 }) {
-  const t = toneOf(delta);
+  const t = tone ?? toneOf(delta);
   return (
     <div className={`flex min-w-0 flex-col p-4 md:p-5 ${CELL_BORDER[i]}`}>
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
-        <p className="min-w-0 truncate text-xs text-muted">{label}</p>
-        <DeltaPill delta={delta} />
+      {/* Nome e selo sempre na mesma linha (no celular, nome abreviado se precisar) */}
+      <div className="mb-1.5 flex min-h-[22px] items-center justify-between gap-1.5">
+        <p className="min-w-0 truncate text-xs text-muted">
+          {short ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span></> : label}
+        </p>
+        {badge ?? <DeltaPill delta={delta} />}
       </div>
       <p className={`font-display font-semibold leading-none tracking-tight tabular-nums ${hero ? "text-[32px] md:text-[40px]" : "text-[28px] md:text-[34px]"}`}>{value}</p>
       <p className="mt-1.5 min-h-[16px] text-[11px] leading-snug text-muted">{sub}</p>
@@ -120,8 +136,6 @@ export default function MetricsSection({ metrics, blocks, canEdit, onOpen }: {
   if (!metrics?.syncedAt || !s) return <Waiting />;
 
   const gain = s.followersGain;
-  const followersDelta = gain !== null && s.followersGainPrev !== null && s.followersGainPrev > 0
-    ? ((gain - s.followersGainPrev) / s.followersGainPrev) * 100 : null;
 
   return (
     <section className="mb-9">
@@ -143,12 +157,14 @@ export default function MetricsSection({ metrics, blocks, canEdit, onOpen }: {
           i={1}
           label="Seguidores"
           value={s.followers === null ? "—" : fmtInt(s.followers)}
-          sub={gain === null ? undefined : <span style={{ color: gain > 0 ? UP.text : gain < 0 ? DOWN.text : undefined }}>{gain > 0 ? "+" : ""}{fmtInt(gain)} {s.followersSince ? `desde ${s.followersSince.slice(8)}/${s.followersSince.slice(5, 7)}` : "no mês"}</span>}
-          delta={followersDelta}
+          sub={gain === null ? undefined : s.followersSince ? `ganho desde ${s.followersSince.slice(8)}/${s.followersSince.slice(5, 7)}` : "ganho no mês"}
+          delta={null}
+          badge={gain === null ? undefined : <GainPill gain={gain} />}
+          tone={gain === null ? undefined : gain > 0 ? UP : gain < 0 ? DOWN : FLAT}
           series={s.series.followers}
         />
         <Stat i={2} label="Salvamentos" value={fmtInt(s.saves)} sub="no mês" delta={s.savesDelta} series={s.series.saves} />
-        <Stat i={3} label="Compartilhamentos" value={fmtInt(s.shares)} sub="no mês" delta={s.sharesDelta} series={s.series.shares} />
+        <Stat i={3} label="Compartilhamentos" short="Compart." value={fmtInt(s.shares)} sub="no mês" delta={s.sharesDelta} series={s.series.shares} />
       </div>
 
       {s.top.length > 0 && (
