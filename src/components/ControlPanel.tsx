@@ -11,10 +11,11 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import type { Block, Client } from "@/lib/types";
 import { FORMATS } from "@/lib/meta";
-import { MONTHS, formatShort, inMonth } from "@/lib/dates";
+import { MONTHS, formatShort, inMonth, todayYmd } from "@/lib/dates";
 import Calendar, { StatusLegend } from "@/components/Calendar";
 import BlockModal from "@/components/BlockModal";
-import MetricsOverview from "@/components/MetricsOverview";
+import { CardMetrics, CardMetricsWaiting, ClientAvatar, syncShort } from "@/components/MetricsOverview";
+import { type Summary, summarize } from "@/lib/metrics";
 import ClientForm from "@/components/ClientForm";
 import { ProgressBar, ProgressLegend } from "@/components/Progress";
 import { Logo, SectionTitle } from "@/components/ui";
@@ -74,6 +75,15 @@ export default function ControlPage() {
   const monthPosts = activeBlocks.filter((b) => inMonth(b.date, ym.y, ym.m) && b.format !== "roteiro");
   const pendingClient = activeBlocks.filter((b) => b.status === "aguardando_aprovacao").length;
   const toPublish = monthPosts.filter((b) => b.status === "aprovado").length;
+
+  // Desempenho no Instagram de cada cliente (mês atual contra o anterior), mostrado no cartão dela
+  const today = todayYmd();
+  const summaries = useMemo(() => {
+    const map = new Map<string, Summary>();
+    store.metrics.forEach((m) => { if (m.syncedAt) map.set(m.clientId, summarize(m, today)); });
+    return map;
+  }, [store.metrics, today]);
+  const lastSync = store.metrics.filter((m) => activeIds.has(m.clientId)).map((m) => m.syncedAt).filter(Boolean).sort().pop() ?? null;
 
   const copyLink = async (slug: string) => {
     try {
@@ -141,21 +151,25 @@ export default function ControlPage() {
         <section className="mb-8">
           <SectionTitle
             right={
-              <button
-                onClick={() => setForm("new")}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:bg-graphite"
-              >
-                <Plus size={14} /> Nova cliente
-              </button>
+              <div className="flex items-center gap-3">
+                {lastSync && <span className="hidden text-[11px] text-muted sm:inline">mLabs {syncShort(lastSync)}</span>}
+                <button
+                  onClick={() => setForm("new")}
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:bg-graphite"
+                >
+                  <Plus size={14} /> Nova cliente
+                </button>
+              </div>
             }
           >
-            Clientes ativas <span className="ml-1 font-normal text-muted">({active.length})</span>
+            Clientes ativas <span className="ml-1 font-normal normal-case tracking-normal text-muted">({active.length})<span className="hidden sm:inline"> · Instagram de 1 a {Number(today.slice(8))} de {MONTHS[Number(today.slice(5, 7)) - 1].toLowerCase()}</span></span>
           </SectionTitle>
           <div className="thin-scroll -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 xl:grid-cols-5">
             {active.map((c) => (
               <ClientCard
                 key={c.id}
                 client={c}
+                summary={summaries.get(c.id) ?? null}
                 pending={store.blocks.filter((b) => b.clientId === c.id && b.status === "aguardando_aprovacao").length}
                 copied={copied === c.slug}
                 onCopy={() => copyLink(c.slug)}
@@ -189,8 +203,6 @@ export default function ControlPage() {
             </div>
           )}
         </section>
-
-        <MetricsOverview clients={active} metrics={store.metrics} />
 
         <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           {/* Calendário geral */}
@@ -312,29 +324,33 @@ export default function ControlPage() {
   );
 }
 
-function ClientCard({ client: c, pending, copied, onCopy, onManage }: {
-  client: Client; pending: number; copied: boolean; onCopy: () => void; onManage: () => void;
+/** Cartão da cliente: identificação, desempenho no Instagram do mês, aprovações e atalhos. */
+function ClientCard({ client: c, summary, pending, copied, onCopy, onManage }: {
+  client: Client; summary: Summary | null; pending: number; copied: boolean; onCopy: () => void; onManage: () => void;
 }) {
   return (
-    <div className="group relative w-[250px] shrink-0 snap-start rounded-2xl border border-mist bg-paper p-4 transition hover:border-sand md:w-auto">
+    <div className="group relative flex w-[264px] shrink-0 snap-start flex-col rounded-2xl border border-mist bg-paper p-4 transition hover:border-sand md:w-auto">
       <span className="absolute left-4 right-4 top-0 h-[3px] rounded-b" style={{ background: c.color }} />
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate font-display text-base font-semibold leading-tight">{c.name}</p>
-          <p className="text-xs text-muted">{c.specialty}</p>
+      <div className="mb-3 flex items-center gap-2.5">
+        <ClientAvatar client={c} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-display text-[15px] font-semibold leading-tight">{c.name}</p>
+          <p className="truncate text-xs text-muted">{c.specialty}</p>
         </div>
         <button
           onClick={onManage}
           aria-label={`Gestão de ${c.name}`}
           title="Gestão da cliente"
-          className="-mr-1.5 -mt-1 rounded-lg p-1.5 text-muted hover:bg-cream hover:text-ink"
+          className="-mr-1.5 shrink-0 self-start rounded-lg p-1.5 text-muted hover:bg-cream hover:text-ink"
         >
           <Settings2 size={15} />
         </button>
       </div>
-      <p className="mb-3 mt-2.5 flex items-center justify-between text-xs text-graphite">
-        <span>{pending > 0 ? <><span className="font-semibold">{pending}</span> aguardando aprovação</> : "Tudo aprovado"}</span>
-        <span className="text-muted" title="Dia de pagamento">Pgto. dia {c.paymentDay}</span>
+      <Link href={`/c/${c.slug}`} className="-mx-1 flex flex-1 flex-col rounded-xl px-1 py-0.5 hover:bg-cream/50" aria-label={`Desempenho de ${c.name}`}>
+        {summary ? <CardMetrics s={summary} /> : <CardMetricsWaiting />}
+      </Link>
+      <p className="mb-2.5 mt-3 border-t border-mist/70 pt-2.5 text-xs text-graphite">
+        {pending > 0 ? <><span className="font-semibold">{pending}</span> aguardando aprovação</> : "Tudo aprovado"}
       </p>
       <div className="flex gap-1.5">
         <Link href={`/c/${c.slug}`} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-paper hover:bg-graphite">
