@@ -84,19 +84,27 @@ function syncLabel(iso: string) {
   return `Atualizado em ${t.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} às ${t.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-function Card({ label, value, sub, delta, series, hero = false }: {
-  label: string; value: string; sub?: React.ReactNode; delta: number | null; series: number[]; hero?: boolean;
+/** Uma métrica dentro do bloco único (divisórias entre as células, sem cartão próprio). */
+const CELL_BORDER = [
+  "",
+  "border-l border-mist",
+  "border-t border-mist lg:border-l lg:border-t-0",
+  "border-l border-t border-mist lg:border-t-0",
+];
+
+function Stat({ i, label, value, sub, delta, series, hero = false }: {
+  i: number; label: string; value: string; sub?: React.ReactNode; delta: number | null; series: number[]; hero?: boolean;
 }) {
   const t = toneOf(delta);
   return (
-    <div className="flex min-w-0 flex-col rounded-2xl border border-mist bg-paper p-4 md:p-5">
-      <div className="mb-1 flex items-start justify-between gap-2">
+    <div className={`flex min-w-0 flex-col p-4 md:p-5 ${CELL_BORDER[i]}`}>
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
         <p className="min-w-0 truncate text-xs text-muted">{label}</p>
         <DeltaPill delta={delta} />
       </div>
-      <p className={`font-display font-semibold leading-none tracking-tight tabular-nums ${hero ? "text-[38px] md:text-[44px]" : "text-[30px] md:text-[34px]"}`}>{value}</p>
-      <p className="mt-1.5 min-h-[16px] text-[11px] text-muted">{sub}</p>
-      <div className="mt-auto pt-3"><Sparkline values={series} color={t.line} /></div>
+      <p className={`font-display font-semibold leading-none tracking-tight tabular-nums ${hero ? "text-[32px] md:text-[40px]" : "text-[28px] md:text-[34px]"}`}>{value}</p>
+      <p className="mt-1.5 min-h-[16px] text-[11px] leading-snug text-muted">{sub}</p>
+      <div className="mt-auto pt-3"><Sparkline values={series} color={t.line} height={44} /></div>
     </div>
   );
 }
@@ -121,28 +129,26 @@ export default function MetricsSection({ metrics, blocks, canEdit, onOpen }: {
         Desempenho no Instagram
       </SectionTitle>
       <p className="-mt-2 mb-3 text-xs text-muted">{periodLabel(s)}<span className="block sm:hidden">{syncLabel(metrics.syncedAt)}</span></p>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="col-span-2 lg:col-span-1">
-          <Card
-            hero
-            label="Alcance médio"
-            value={s.avgReach === null ? "—" : fmtInt(s.avgReach)}
-            sub={s.postCount ? `por post · ${s.postCount} ${s.postCount === 1 ? "post" : "posts"} no mês` : "Nenhum post no mês ainda"}
-            delta={s.avgReachDelta}
-            series={s.series.reach}
-          />
-        </div>
-        <div className="col-span-2 lg:col-span-1">
-        <Card
+      <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-mist bg-paper lg:grid-cols-4">
+        <Stat
+          i={0}
+          hero
+          label="Alcance médio"
+          value={s.avgReach === null ? "—" : fmtInt(s.avgReach)}
+          sub={s.postCount ? `por post · ${s.postCount} ${s.postCount === 1 ? "post" : "posts"} no mês` : "Nenhum post no mês ainda"}
+          delta={s.avgReachDelta}
+          series={s.series.reach}
+        />
+        <Stat
+          i={1}
           label="Seguidores"
           value={s.followers === null ? "—" : fmtInt(s.followers)}
           sub={gain === null ? undefined : <span style={{ color: gain > 0 ? UP.text : gain < 0 ? DOWN.text : undefined }}>{gain > 0 ? "+" : ""}{fmtInt(gain)} {s.followersSince ? `desde ${s.followersSince.slice(8)}/${s.followersSince.slice(5, 7)}` : "no mês"}</span>}
           delta={followersDelta}
           series={s.series.followers}
         />
-        </div>
-        <Card label="Salvamentos" value={fmtInt(s.saves)} sub="no mês" delta={s.savesDelta} series={s.series.saves} />
-        <Card label="Compartilhamentos" value={fmtInt(s.shares)} sub="no mês" delta={s.sharesDelta} series={s.series.shares} />
+        <Stat i={2} label="Salvamentos" value={fmtInt(s.saves)} sub="no mês" delta={s.savesDelta} series={s.series.saves} />
+        <Stat i={3} label="Compartilhamentos" value={fmtInt(s.shares)} sub="no mês" delta={s.sharesDelta} series={s.series.shares} />
       </div>
 
       {s.top.length > 0 && (
@@ -244,11 +250,9 @@ function Waiting() {
     <section className="mb-9">
       <SectionTitle>Desempenho no Instagram</SectionTitle>
       <div className="relative">
-        <div className="pointer-events-none grid select-none grid-cols-2 gap-3 opacity-60 blur-[6px] lg:grid-cols-4" aria-hidden>
+        <div className="pointer-events-none grid select-none grid-cols-2 overflow-hidden rounded-2xl border border-mist bg-paper opacity-60 blur-[6px] lg:grid-cols-4" aria-hidden>
           {[[0, 6, 4, 9, 7, 12], [3, 4, 6, 6, 8, 9], [5, 3, 6, 4, 7, 5], [2, 5, 3, 6, 4, 7]].map((v, i) => (
-            <div key={i} className={i < 2 ? "col-span-2 lg:col-span-1" : ""}>
-              <Card label="Carregando" value="0.000" delta={null} series={v} hero={i === 0} />
-            </div>
+            <Stat key={i} i={i} label="Carregando" value="0.000" delta={null} series={v} hero={i === 0} />
           ))}
         </div>
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
