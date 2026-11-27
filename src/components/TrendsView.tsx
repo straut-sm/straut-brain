@@ -17,6 +17,8 @@ import type { TrendInput, TrendItem, TrendKind } from "@/lib/types";
 const CLAY = "#b9583a";
 const GREEN_TEXT = "#3f6b46";
 const WA_GREEN = "#25603a";
+/** "Ver referência" e "Virar roteiro": mesmo peso, lado a lado. */
+const REF_BTN = "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-sand bg-paper px-3 py-2 text-xs font-medium text-ink hover:bg-cream";
 
 /** Segunda-feira da semana de uma data. */
 function mondayOf(ymd: string) {
@@ -257,14 +259,14 @@ function Week({ items, canEdit, onEdit, onAdd, onPublish, onOpenStories, onToScr
                 {r.body && <p className="whitespace-pre-line text-[13px] leading-relaxed text-graphite">{r.body}</p>}
                 {r.adapt && <p className="mt-2.5 rounded-lg bg-[#eef4ec] px-2.5 py-2 text-xs leading-relaxed" style={{ color: GREEN_TEXT }}><b className="font-semibold">Como adaptar:</b> {r.adapt}</p>}
                 {(r.link || canEdit) && (
-                  <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
-                    {r.link ? (
-                      <a href={r.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink">
-                        Ver referência <ExternalLink size={12} />
+                  <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+                    {r.link && (
+                      <a href={r.link} target="_blank" rel="noreferrer" className={REF_BTN}>
+                        <ExternalLink size={13} /> Ver referência
                       </a>
-                    ) : <span />}
+                    )}
                     {canEdit && (
-                      <button onClick={() => onToScript(r)} className="inline-flex items-center gap-1.5 rounded-xl border border-sand px-3 py-1.5 text-xs font-medium hover:bg-cream">
+                      <button onClick={() => onToScript(r)} className={REF_BTN}>
                         <FileText size={13} /> Virar roteiro
                       </button>
                     )}
