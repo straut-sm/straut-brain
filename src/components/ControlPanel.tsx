@@ -336,6 +336,9 @@ function ClientCard({ client: c, summary, pending, copied, onCopy, onManage }: {
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-[15px] font-semibold leading-tight">{c.name}</p>
           <p className="truncate text-xs text-muted">{c.specialty}</p>
+          <p className="mt-0.5 truncate text-xs text-graphite">
+            {pending > 0 ? <><span className="font-semibold">{pending}</span> aguardando aprovação</> : "Tudo aprovado"}
+          </p>
         </div>
         <button
           onClick={onManage}
@@ -349,10 +352,7 @@ function ClientCard({ client: c, summary, pending, copied, onCopy, onManage }: {
       <Link href={`/c/${c.slug}`} className="-mx-1 flex flex-1 flex-col rounded-xl px-1 py-0.5 hover:bg-cream/50" aria-label={`Desempenho de ${c.name}`}>
         {summary ? <CardMetrics s={summary} /> : <CardMetricsWaiting />}
       </Link>
-      <p className="mb-2.5 mt-3 border-t border-mist/70 pt-2.5 text-xs text-graphite">
-        {pending > 0 ? <><span className="font-semibold">{pending}</span> aguardando aprovação</> : "Tudo aprovado"}
-      </p>
-      <div className="flex gap-1.5">
+      <div className="mt-3 flex gap-1.5">
         <Link href={`/c/${c.slug}`} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-paper hover:bg-graphite">
           Abrir página <ArrowUpRight size={13} />
         </Link>
