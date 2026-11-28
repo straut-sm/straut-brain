@@ -86,10 +86,10 @@ sem essa data aparece desfocada, com "Aguardando sincronização". O cálculo é
   escrito pelo Claude (`reason_by = 'Claude'`) e pode ser editado pela Straut na página da cliente.
 - Post ↔ bloco: pelo link colado no bloco (`blocks.instagram_url`); sem link, pela mesma data e formato.
 
-Rotina diária: a tarefa agendada `painel-metricas-mlabs` do app do Claude (no computador do Guilherme, seg a sex
-às 9h; se o computador estiver desligado, roda quando ele ligar) busca os últimos 45 dias no mLabs e grava com
-`node --env-file=.env.local scripts/sync-metrics.mjs <slug> <mlabs_profile_id> <arquivos>`. Depois escreve o motivo
-dos 3 melhores posts do mês que ainda não têm motivo. Na página principal, o resumo do mês fica dentro do cartão de cada cliente
+Rotina diária: desde 27/11/2026 é da **Analista** (bot do OpenBot, seg a sex às 9h), que busca os últimos 45 dias no
+mLabs e grava pela API dos bots (`PUT /api/bots/clientes/:slug/metricas`), com o motivo dos 3 melhores posts do mês.
+A antiga tarefa do Claude (`painel-metricas-mlabs`) foi desligada; o script `scripts/sync-metrics.mjs` fica para
+cargas manuais. Na página principal, o resumo do mês fica dentro do cartão de cada cliente
 (`src/components/MetricsOverview.tsx`), junto com as aprovações pendentes e os atalhos.
 
 ## Aba Tendências
@@ -98,8 +98,9 @@ Página `/c/[slug]/tendencias` (Straut: edita, libera, "Virar roteiro") e `/p/[s
 que foi liberado). Tabela `trend_items`: uma linha por item, `kind` = `mercado` | `referencia` | `stories`,
 agrupados por `week_of` (segunda-feira). O antigo `gravar` saiu em 27/11/2026 (repetia as referências): cada
 referência tem "Virar roteiro" (`src/lib/trends.ts`), que cria o roteiro com o texto, o "como adaptar" e o link. A semana só aparece para a cliente com `published_at` preenchido (botão
-"Liberar para a cliente"). `clients.trends_seen_at` controla o aviso "nova" no botão da cliente. A rotina
-`painel-tendencias-semana` (segunda às 10h, no computador do Guilherme) pesquisa e grava a semana como rascunho.
+"Liberar para a cliente"). `clients.trends_seen_at` controla o aviso "nova" no botão da cliente. A Social Media
+(bot do OpenBot, segunda às 7h) pesquisa e grava a semana como rascunho pela API (a antiga tarefa do Claude,
+`painel-tendencias-semana`, foi desligada em 27/11/2026).
 Apagar manda para a Lixeira.
 
 ## Como rodar
