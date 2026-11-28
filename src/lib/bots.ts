@@ -854,3 +854,158 @@ export async function trendToScriptApi(id: string, bot: string, body: Record<str
   const blockId = await trendToBlock(row, date, bot);
   return getBlockApi(blockId);
 }
+
+// ---------------------------------------------------------------------------
+// Métricas: gravação (só a Analista, que busca no mLabs; os outros bots leem do painel)
+// ---------------------------------------------------------------------------
+
+const MLABS_FORMAT: Record<string, PostFormat> = {
+  reels: "reels", reel: "reels", video: "reels", carrossel: "carrossel", carousel: "carrossel", carousel_album: "carrossel",
+  foto: "foto", image: "foto", photo: "foto", imagem: "foto",
+};
+/** Dia no horário de São Paulo (UTC-3, sem horário de verão). */
+const spDay = (iso: string) => new Date(new Date(iso).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+const count = (v: unknown, name: string) => {
+  if (v === undefined || v === null) return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new ApiError(400, `${name} precisa ser um número maior ou igual a zero.`);
+  return Math.round(n);
+};
+
+/**
+ * Grava (ou atualiza) os números do mLabs de uma cliente: posts, seguidores por dia e, opcionalmente,
+ * o motivo dos melhores posts. Nunca apaga nada e nunca troca um motivo escrito à mão pela Straut.
+ */
+export async function saveMetricsApi(slug: string, bot: string, body: Record<string, unknown>) {
+  const c = await clientBySlug(slug);
+  const posts = body.posts ?? [];
+  const seguidores = body.seguidores ?? [];
+  if (!Array.isArray(posts) || !Array.isArray(seguidores)) throw new ApiError(400, "posts e seguidores precisam ser listas.");
+  if (!posts.length && !seguidores.length) throw new ApiError(400, "Mande pelo menos um post ou um dia de seguidores.");
+  if (posts.length > 500 || seguidores.length > 400) throw new ApiError(400, "No máximo 500 posts e 400 dias de seguidores por envio.");
+  const perfil = body.perfil_mlabs === undefined ? undefined : text(body.perfil_mlabs, "perfil_mlabs", 200);
+
+  const now = new Date().toISOString();
+  const rows = new Map<string, Record<string, unknown>>();
+  const reasons: { code: string; motivo: string }[] = [];
+  posts.forEach((raw, i) => {
+    const p = (raw ?? {}) as Record<string, unknown>;
+    const pos = `posts[${i}]`;
+    const link = text(p.link, `${pos}.link`, 300) ?? "";
+    const code = /instagram\.com\/(?:[\w.]+\/)?(?:p|reel|reels|tv)\/([\w-]+)/.exec(link)?.[1];
+    if (!code) throw new ApiError(400, `${pos}.link precisa ser o link do post no Instagram (/p/... ou /reel/...).`);
+    const when = text(p.publicado_em, `${pos}.publicado_em`, 40);
+    if (!when || Number.isNaN(Date.parse(when))) throw new ApiError(400, `${pos}.publicado_em precisa ser data e hora (ISO), como 2026-11-24T20:37:06Z.`);
+    const format = MLABS_FORMAT[String(p.formato ?? "").toLowerCase()];
+    if (!format) throw new ApiError(400, `${pos}.formato precisa ser reels, carrossel ou foto.`);
+    rows.set(code, {
+      client_id: c.id, external_id: code, permalink: link, published_at: new Date(when).toISOString(), date: spDay(when), format,
+      caption: String(p.legenda ?? "").split(/\n/)[0].slice(0, 160),
+      reach: count(p.alcance, `${pos}.alcance`), views: count(p.visualizacoes, `${pos}.visualizacoes`),
+      likes: count(p.curtidas, `${pos}.curtidas`), comments: count(p.comentarios, `${pos}.comentarios`),
+      saves: count(p.salvamentos, `${pos}.salvamentos`), shares: count(p.compartilhamentos, `${pos}.compartilhamentos`),
+      updated_at: now,
+    });
+    const motivo = text(p.motivo, `${pos}.motivo`, 600)?.trim();
+    if (motivo) reasons.push({ code, motivo });
+  });
+  const days = new Map<string, number>();
+  seguidores.forEach((raw, i) => {
+    const f = (raw ?? {}) as Record<string, unknown>;
+    const d = ymdParam(f.data as string, `seguidores[${i}].data`);
+    if (!d) throw new ApiError(400, `seguidores[${i}].data é obrigatório (AAAA-MM-DD).`);
+    days.set(d, count(f.seguidores, `seguidores[${i}].seguidores`));
+  });
+
+  if (rows.size) {
+    const { error } = await db().from("ig_posts").upsert([...rows.values()], { onConflict: "client_id,external_id" });
+    if (error) throw error;
+  }
+  if (days.size) {
+    const { error } = await db().from("ig_followers")
+      .upsert([...days].map(([date, followers]) => ({ client_id: c.id, date, followers })), { onConflict: "client_id,date" });
+    if (error) throw error;
+  }
+  let motivos = 0;
+  for (const r of reasons) {
+    const { data, error } = await db().from("ig_posts").update({ reason: r.motivo, reason_by: `bot ${bot}`, updated_at: now })
+      .eq("client_id", c.id).eq("external_id", r.code).or("reason_by.is.null,reason_by.neq.Straut").select("id");
+    if (error) throw error;
+    motivos += data?.length ?? 0;
+  }
+  const { error: ue } = await db().from("clients")
+    .update({ metrics_synced_at: now, ...(perfil ? { mlabs_profile_id: perfil } : {}) }).eq("id", c.id);
+  if (ue) throw ue;
+  return {
+    cliente: c.slug, posts_gravados: rows.size, dias_de_seguidores: days.size, motivos_gravados: motivos,
+    motivos_mantidos: reasons.length - motivos, sincronizado_em: now,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Novidades: o que mudou desde um momento (para os bots agirem só quando há algo novo)
+// ---------------------------------------------------------------------------
+
+const NEWS_LIMIT = 300;
+
+/**
+ * Lista o histórico dos blocos e os comentários criados depois de `desde`, das clientes ativas.
+ * Por padrão esconde o que o próprio bot fez (incluir_meus=sim mostra tudo).
+ */
+export async function newsApi(bot: string, p: URLSearchParams) {
+  const desde = p.get("desde");
+  if (!desde || Number.isNaN(Date.parse(desde))) {
+    throw new ApiError(400, "Informe desde=<data e hora ISO>, por exemplo desde=2026-11-27T08:00:00-03:00. Guarde o campo ate da resposta e use na próxima consulta.");
+  }
+  const from = new Date(desde).toISOString();
+  if (Date.now() - Date.parse(from) > 14 * 86400 * 1000) throw new ApiError(400, "desde pode ser no máximo 14 dias atrás.");
+  const ate = new Date().toISOString();
+  const mine = sim(p.get("incluir_meus"));
+  const only = p.get("cliente");
+  const quem = p.get("autor"); // cliente | straut
+  if (quem && quem !== "cliente" && quem !== "straut") throw new ApiError(400, "autor precisa ser cliente ou straut.");
+
+  const clients = (await activeClients()).filter((c) => !only || c.slug === only);
+  if (only && !clients.length) throw new ApiError(404, "Cliente não encontrada ou inativa.");
+  const slugOf = new Map(clients.map((c) => [c.id, c.slug]));
+  const { data: blocks, error: be } = await db().from("blocks").select("id, client_id, title, date, format, status")
+    .in("client_id", [...slugOf.keys()]).is("deleted_at", null);
+  if (be) throw be;
+  const blockMap = new Map((blocks ?? []).map((b) => [b.id as string, b]));
+  const ids = [...blockMap.keys()];
+  if (!ids.length) return { desde: from, ate, total: 0, limite_atingido: false, novidades: [] };
+
+  const narrow = (q: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    let r = q.gt("at", from).lte("at", ate).order("at", { ascending: true }).limit(NEWS_LIMIT);
+    if (quem === "cliente") r = r.eq("author", "Cliente");
+    if (quem === "straut") r = r.eq("author", "Straut");
+    if (!mine) r = r.or(`bot.is.null,bot.neq.${bot}`);
+    return r;
+  };
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+  const [hist, coms] = await Promise.all([
+    Promise.all(chunks.map((ch) => narrow(db().from("block_history").select("block_id, at, author, action, bot").in("block_id", ch)))),
+    Promise.all(chunks.map((ch) => narrow(db().from("block_comments").select("block_id, at, author, text, bot, internal").in("block_id", ch)))),
+  ]);
+  const fail = [...hist, ...coms].find((r) => r.error);
+  if (fail?.error) throw fail.error;
+
+  const ctx = (blockId: string) => {
+    const b = blockMap.get(blockId)!;
+    return { cliente: slugOf.get(b.client_id), bloco_id: b.id, titulo: b.title, data: b.date, formato: b.format, status: b.status };
+  };
+  const who = (author: string, b: string | null) => (author === "Cliente" ? "cliente" : b ? `bot ${b}` : "straut");
+  type Row = { block_id: string; at: string; author: string; bot: string | null; action?: string; text?: string; internal?: boolean };
+  const rowsOf = (rs: { data: unknown }[]) => rs.flatMap((r) => (r.data ?? []) as Row[]);
+  const items = [
+    ...rowsOf(hist).map((h) => ({ tipo: "historico", em: h.at, quem: who(h.author, h.bot), acao: h.action, ...ctx(h.block_id) })),
+    ...rowsOf(coms).map((c) => ({ tipo: "comentario", em: c.at, quem: who(c.author, c.bot), interno: !!c.internal, texto: c.text, ...ctx(c.block_id) })),
+  ].sort((a, b) => a.em.localeCompare(b.em));
+  // Se alguma consulta bateu no limite, mostra só até o último momento que veio completo
+  // e devolve esse momento em "ate", para a próxima consulta continuar dali.
+  const full = [...hist, ...coms].filter((r) => ((r.data ?? []) as Row[]).length >= NEWS_LIMIT);
+  const boundary = full.length ? full.map((r) => (r.data as Row[])[NEWS_LIMIT - 1].at).sort()[0] : null;
+  const shown = boundary ? items.filter((x) => x.em <= boundary) : items;
+  return { desde: from, ate: boundary ?? ate, total: shown.length, limite_atingido: !!boundary, novidades: shown };
+}

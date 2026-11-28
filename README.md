@@ -51,6 +51,10 @@ time: `straut-team/integracoes/api-dos-bots.md`.
 - Limite de 60 requisições por minuto por bot; toda chamada fica registrada em `bot_requests`.
 - Também leem as métricas do Instagram, os dias de produção (e marcam a lista) e a aba Tendências
   (criam e editam rascunhos e usam "Virar roteiro"; liberar para a cliente continua só no painel).
+- **Métricas:** a Analista grava os números do mLabs com `PUT /clientes/:slug/metricas` (nunca troca um
+  motivo do top 3 escrito pela Straut). Os outros bots só leem.
+- **Novidades:** `GET /novidades?desde=` devolve o histórico e os comentários novos desde aquele momento,
+  para os bots agirem só quando algo mudou, em vez de varrer o painel.
 - Os bots podem apagar, marcar como publicado e aceitar sugestões. Aprovar, restaurar versões e o
   cadastro das clientes continuam só no painel.
 - **Lixeira:** apagar (pelo painel ou pela API) só marca `deleted_at`. O item fica 30 dias na Lixeira

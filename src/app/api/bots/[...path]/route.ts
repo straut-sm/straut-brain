@@ -5,7 +5,7 @@ import {
   pendencies, publishApi, reorderApi, searchBlocks, sendForApprovalApi, updateBlockApi, uploadUrls,
   clientMetrics, clientProductionDays, createProductionDayApi, getProductionDay, updateProductionDayApi, deleteProductionDayApi,
   setProductionOrderApi, setProductionStateApi, clientTrends, createTrendApi, getTrendApi, updateTrendApi, deleteTrendApi,
-  trendToScriptApi,
+  trendToScriptApi, saveMetricsApi, newsApi,
 } from "@/lib/bots";
 
 /*
@@ -24,6 +24,7 @@ const routes: { method: string; pattern: string[]; run: Handler; status?: number
   { method: "GET", pattern: ["clientes", ":slug", "resumo"], run: ({ seg, q }) => clientSummary(seg[1], q.get("mes")) },
   { method: "GET", pattern: ["clientes", ":slug", "blocos"], run: ({ seg, q }) => clientBlocks(seg[1], q) },
   { method: "GET", pattern: ["pendencias"], run: () => pendencies() },
+  { method: "GET", pattern: ["novidades"], run: ({ q, bot }) => newsApi(bot, q) },
   { method: "GET", pattern: ["blocos"], run: ({ q }) => searchBlocks(q) },
   { method: "GET", pattern: ["blocos", ":id"], run: ({ seg }) => getBlockApi(seg[1]) },
   // Escrita (nada destrutivo)
@@ -43,6 +44,8 @@ const routes: { method: string; pattern: string[]; run: Handler; status?: number
 
   // Métricas do Instagram (só leitura)
   { method: "GET", pattern: ["clientes", ":slug", "metricas"], run: ({ seg, q }) => clientMetrics(seg[1], q) },
+  // Gravação dos números do mLabs: só a Analista
+  { method: "PUT", pattern: ["clientes", ":slug", "metricas"], run: async ({ seg, bot, body }) => saveMetricsApi(seg[1], bot, await body()) },
 
   // Dias de produção
   { method: "GET", pattern: ["clientes", ":slug", "producao"], run: ({ seg, q }) => clientProductionDays(seg[1], q) },
